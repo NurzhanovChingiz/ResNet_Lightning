@@ -6,10 +6,11 @@ import os
 import torch
 from torch.backends import cudnn
 from model import ResNet18
-from pydantic import BaseModel
+from typing import Any
 torch.set_float32_matmul_precision('high')
 
-class CFG(BaseModel):
+
+class CFG:
     SEED: int = 137
     set_seed(SEED)
     clear_memory()
@@ -19,7 +20,9 @@ class CFG(BaseModel):
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
     DATASET_ID: str = "vitaliykinakh/stable-imagenet1k"
-    DOWNLOAD_PATH: str = "data"
+    DOWNLOAD_PATH: str = "data/raw/"
+    if not os.path.exists(DOWNLOAD_PATH):
+        os.makedirs(DOWNLOAD_PATH)
     IMAGE_DIR: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
     
     # Data split parameters
@@ -42,7 +45,7 @@ class CFG(BaseModel):
     MODEL_NAME: str = "ResNet18"
     PRETRAIN: bool = False
     # Model
-    MODEL = ResNet18(num_classes=1000, pretrained=PRETRAIN)
+    MODEL: Any = ResNet18(num_classes=1000, pretrained=PRETRAIN)
     
     # Compile
     COMPILE_MODEL: bool = True
@@ -56,19 +59,19 @@ class CFG(BaseModel):
             print(f"Warning: torch.compile() disabled (fallback to eager). Reason: {e}")
             
     # Metrics      
-    CAPTURE_METRICS = True
+    CAPTURE_METRICS: bool = True
     TASK: str = "multiclass"  
     NUM_CLASSES: int = 1000 
     
-     # Image parameters
-    IMG_SIZE = 128
-    CROP_SIZE = IMG_SIZE-32 #224
+    # Image parameters
+    IMG_SIZE: int = 128
+    CROP_SIZE: int = IMG_SIZE-32 #224
     
     # Training parameters
     BATCH_SIZE: int = 128
     EPOCHS: int = 40
     LR: float = 0.001
-    EPS: float =1e-10
+    EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
     
     NUM_WORKERS: int = 32
@@ -82,10 +85,10 @@ class CFG(BaseModel):
     # SCALER = torch.amp.GradScaler(device=DEVICE.type, enabled=USE_AMP) if USE_AMP else None
     
     # Loss function and optimizer
-    LOSS_FN = torch.nn.CrossEntropyLoss()
-    OPTIMIZER = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    LOSS_FN: Any = torch.nn.CrossEntropyLoss()
+    OPTIMIZER: Any = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     
-    TRAIN_TRANSFORM = v2.Compose([
+    TRAIN_TRANSFORM: Any = v2.Compose([
         v2.Resize(IMG_SIZE, interpolation=InterpolationMode.BILINEAR, antialias=True),
         v2.CenterCrop(CROP_SIZE),
         v2.ToImage(),  # ensures Tensor image; works for PIL/ndarray too
@@ -94,7 +97,7 @@ class CFG(BaseModel):
                      std=(0.229, 0.224, 0.225)),
     ])
         
-    TEST_TRANSFORM = v2.Compose([
+    TEST_TRANSFORM: Any = v2.Compose([
         v2.Resize(IMG_SIZE, interpolation=InterpolationMode.BILINEAR, antialias=True),
         v2.CenterCrop(CROP_SIZE),
         v2.ToImage(),  # ensures Tensor image; works for PIL/ndarray too
