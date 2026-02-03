@@ -1,15 +1,11 @@
 from utils.clear_gpu import clear_memory
 from utils.set_seed import set_seed
-from utils.summary import summary
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
-from torch.nn.parallel import DataParallel as DDP
 import os
 import torch
 from torch.backends import cudnn
 from model import ResNet18
-import re
-from glob import glob
 from pydantic import BaseModel
 torch.set_float32_matmul_precision('high')
 
@@ -73,7 +69,6 @@ class CFG(BaseModel):
     EPOCHS: int = 40
     LR: float = 0.001
     EPS: float =1e-10
-    MOMENTUM: float = 0.9
     WEIGHT_DECAY: float = 0.01
     
     NUM_WORKERS: int = 32
@@ -88,6 +83,7 @@ class CFG(BaseModel):
     
     # Loss function and optimizer
     LOSS_FN = torch.nn.CrossEntropyLoss()
+    OPTIMIZER = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
     
     TRAIN_TRANSFORM = v2.Compose([
         v2.Resize(IMG_SIZE, interpolation=InterpolationMode.BILINEAR, antialias=True),
