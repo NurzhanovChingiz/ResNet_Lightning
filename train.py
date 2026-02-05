@@ -33,7 +33,7 @@ if __name__ == "__main__":
         test_dataloader = DataLoader(
             test_dataset, batch_size=1, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
         )
-        model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM)
+        model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
         
         # Setup loggers - TensorBoard and CSV for saving to lightning_logs
         tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs")
@@ -43,8 +43,6 @@ if __name__ == "__main__":
             accelerator=CFG.ACCELERATOR,
             precision=CFG.PRECISION,
             max_epochs=CFG.EPOCHS,
-            # log_every_n_steps=10,
-            # val_check_interval=1.0,
             logger=[tb_logger, csv_logger],
             enable_progress_bar=True,
         )
@@ -52,14 +50,13 @@ if __name__ == "__main__":
             model=model,
             train_dataloaders=train_dataloader,
             val_dataloaders=val_dataloader,
-            # weights_only=True
+            weights_only=True
             )
-        # trainer.test(
-        #     model=model,
-        #     dataloaders=test_dataloader,
-        #     ckpt_path=CFG.CKPT_PATH,
-        #     weights_only=True
-        #     )
+        trainer.test(
+            model=model,
+            dataloaders=test_dataloader,
+            weights_only=True
+            )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         print(f"Training completed in {elapsed_time/60:.2f} minutes.")

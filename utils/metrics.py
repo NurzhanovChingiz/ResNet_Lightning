@@ -26,22 +26,22 @@ def suppress_nan_check(MetricClass):
             return x, weight
     return DisableNanCheck
 
-class MetricsTracker:
+class MetricsTracker(torch.nn.Module):
     def __init__(self):
+        super().__init__()
         NoNanMeanMetric = suppress_nan_check(MeanMetric)
-        self.metrics = {
+        self.metrics = torch.nn.ModuleDict({
             "avg_loss": NoNanMeanMetric(),
-            "accuracy top1": Accuracy(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='weighted', top_k=1),
-            "accuracy top5": Accuracy(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='weighted', top_k=5),
+            "accuracy_top1": Accuracy(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='weighted', top_k=1),
+            "accuracy_top5": Accuracy(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='weighted', top_k=5),
             "precision": Precision(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='macro'),
             "recall": Recall(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='macro'),
             "f1_score": F1Score(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='macro'),
-        }
-        self._init()
+        })
     
     def update_metrics(self, preds, targets):
-        self.metrics["accuracy top1"].update(preds, targets)
-        self.metrics["accuracy top5"].update(preds, targets)
+        self.metrics["accuracy_top1"].update(preds, targets)
+        self.metrics["accuracy_top5"].update(preds, targets)
         self.metrics["precision"].update(preds, targets)
         self.metrics["recall"].update(preds, targets)
         self.metrics["f1_score"].update(preds, targets)
@@ -57,11 +57,10 @@ class MetricsTracker:
         for metric in self.metrics.values():
             metric.reset()
             
-    def _init(self):
-        self.metrics = {name: metric.to(CFG.DEVICE) for name, metric in self.metrics.items()}
         
     def get_metric(self, name: str):
-        return self.metrics.get(name)    
+        return self.metrics[name]
+    
     def print_metrics(self):
         # Check if any updates have been made before computing
         # MeanMetric uses mean_value as state, classification metrics use preds/target

@@ -58,7 +58,7 @@ class CFG:
             print(f"Warning: torch.compile() disabled (fallback to eager). Reason: {e}")
             
     # Metrics      
-    CAPTURE_METRICS: bool = True
+    PRINT_METRICS_TO_TERMINAL: bool = True
     TASK: str = "multiclass"  
     NUM_CLASSES: int = 1000 
     
@@ -68,7 +68,7 @@ class CFG:
     
     # Training parameters
     BATCH_SIZE: int = 128
-    EPOCHS: int = 1
+    EPOCHS: int = 20
     LR: float = 0.001
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
