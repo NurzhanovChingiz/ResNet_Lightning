@@ -63,6 +63,12 @@ class MetricsTracker:
     def get_metric(self, name: str):
         return self.metrics.get(name)    
     def print_metrics(self):
+        # Check if any updates have been made before computing
+        # MeanMetric uses mean_value as state, classification metrics use preds/target
+        avg_loss_metric = self.metrics["avg_loss"]
+        if avg_loss_metric.weight.sum() == 0:
+            # No updates have been made, skip printing
+            return 
         computed_metrics = self.compute()
         for name, value in computed_metrics.items():
             # in one line

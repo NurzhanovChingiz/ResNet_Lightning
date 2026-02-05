@@ -1,8 +1,10 @@
 import torch
 import numpy as np
 import random
+from lightning.pytorch import seed_everything
 
 def set_seed(SEED: int = 42):
+    seed_everything(SEED)
     torch.manual_seed(SEED)
     torch.cuda.manual_seed(SEED)
     torch.cuda.manual_seed_all(SEED)

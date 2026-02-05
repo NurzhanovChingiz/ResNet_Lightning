@@ -26,11 +26,12 @@ class CFG:
     IMAGE_DIR: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
     
     # Data split parameters
-    TEST_SIZE: float = 0.3
-    VAL_SIZE: float = 0.1
+    TEST_SIZE: float = 0.6
+    VAL_SIZE: float = 0.2
     STRATIFY: bool = True
     
     # Device
+    ACCELERATOR: str = "cuda" if torch.cuda.is_available() else "cpu"
     DEVICE: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {DEVICE}")
     
@@ -38,9 +39,7 @@ class CFG:
     MAIN_DIR: str = os.getcwd()
     BASE_DIR: str = f"{MAIN_DIR}/data" # Must be pre-downloaded
     
-    OUTPUT_DIR: str = os.path.join(MAIN_DIR, "output", "pretrained_models")
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    # CKPT_PATH: str = "lightning_logs/version_0/checkpoints/epoch=0-step=100.ckpt"
     
     MODEL_NAME: str = "ResNet18"
     PRETRAIN: bool = False
@@ -69,7 +68,7 @@ class CFG:
     
     # Training parameters
     BATCH_SIZE: int = 128
-    EPOCHS: int = 40
+    EPOCHS: int = 1
     LR: float = 0.001
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
@@ -78,7 +77,7 @@ class CFG:
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
     PERSISTENT_WORKERS: bool = True
-    
+    PRECISION: str = "bf16-mixed" if torch.cuda.is_available() else "32-true"
     # Automatic Mixed Precision (AMP)
     # USE_AMP: bool = True
     # AMP_DTYPE: torch.dtype | None = torch.float16 if USE_AMP else None

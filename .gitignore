@@ -4,6 +4,6 @@ __pycache__/
 # Data
 /data/
 /imagenet1k/
-
+/lightning_logs/
 # saved outputs
 /output/
