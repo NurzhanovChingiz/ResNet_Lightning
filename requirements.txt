@@ -1,0 +1,14 @@
+# AMD ROCm PyTorch builds (extra index)
+--extra-index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/
+
+# PyTorch packages (from AMD index)
+torch
+torchvision
+torchaudio
+
+# Standard PyPI packages
+torchmetrics
+kagglehub
+scikit-learn
+pytorch-lightning
+pytorch-lightning["extra"]

@@ -7,15 +7,28 @@ import torch
 from torch.backends import cudnn
 from model import ResNet18
 from typing import Any
-torch.set_float32_matmul_precision('high')
+
+# Workaround for ROCm/HIP kernel compatibility issues on newer AMD GPUs
+# Try setting HSA_OVERRIDE_GFX_VERSION if you get "device kernel image is invalid" errors
+# Example: set HSA_OVERRIDE_GFX_VERSION=11.0.0 in your environment before running
+# torch.set_float32_matmul_precision('high')  # Disabled for ROCm compatibility
 
 
 class CFG:
     SEED: int = 137
     set_seed(SEED)
     clear_memory()
-
-    cudnn.benchmark = True
+    nvidia_smi_available = os.system("nvidia-smi") == 0 
+    if nvidia_smi_available:
+        ACCELERATOR: str = "cuda"
+        DEVICE: torch.device = torch.device("cuda")
+        print(f"Using device: {DEVICE}")
+        cudnn.benchmark = True
+    else:
+        ACCELERATOR: str = "cpu"
+        DEVICE: torch.device = torch.device("cpu")
+        print(f"Using device: {DEVICE}")
+        cudnn.benchmark = False
 
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
@@ -30,24 +43,19 @@ class CFG:
     VAL_SIZE: float = 0.2
     STRATIFY: bool = True
     
-    # Device
-    ACCELERATOR: str = "cuda" if torch.cuda.is_available() else "cpu"
-    DEVICE: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {DEVICE}")
-    
     # Directories
     MAIN_DIR: str = os.getcwd()
     BASE_DIR: str = f"{MAIN_DIR}/data" # Must be pre-downloaded
     
-    # CKPT_PATH: str = "lightning_logs/version_0/checkpoints/epoch=0-step=100.ckpt"
-    
+    # Model parameters
     MODEL_NAME: str = "ResNet18"
     PRETRAIN: bool = False
     # Model
     MODEL: Any = ResNet18(num_classes=1000, pretrained=PRETRAIN)
     
     # Compile
-    COMPILE_MODEL: bool = True
+    # NOTE: torch.compile() is disabled because ROCm/HIP has limited support for it
+    COMPILE_MODEL: bool = False
     if COMPILE_MODEL:
         try:
             MODEL = torch.compile(MODEL,
@@ -72,17 +80,15 @@ class CFG:
     LR: float = 0.001
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
-    
-    NUM_WORKERS: int = 32
+    MIN_DELTA: float = 0.001
+    PATIENCE: int = 5
+    NUM_WORKERS: int = os.cpu_count() // 2 if nvidia_smi_available else 0
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
-    PERSISTENT_WORKERS: bool = True
-    PRECISION: str = "bf16-mixed" if torch.cuda.is_available() else "32-true"
-    # Automatic Mixed Precision (AMP)
-    # USE_AMP: bool = True
-    # AMP_DTYPE: torch.dtype | None = torch.float16 if USE_AMP else None
-    # SCALER = torch.amp.GradScaler(device=DEVICE.type, enabled=USE_AMP) if USE_AMP else None
-    
+    PERSISTENT_WORKERS: bool = False
+
+    # Precision
+    PRECISION: str = "32-true"
     # Loss function and optimizer
     LOSS_FN: Any = torch.nn.CrossEntropyLoss()
     OPTIMIZER: Any = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)

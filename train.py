@@ -1,4 +1,5 @@
 import lightning as L
+from lightning.pytorch.callbacks.early_stopping import EarlyStopping
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from config import CFG
 from utils.trainer import Model
@@ -45,6 +46,11 @@ if __name__ == "__main__":
             max_epochs=CFG.EPOCHS,
             logger=[tb_logger, csv_logger],
             enable_progress_bar=True,
+            callbacks=[EarlyStopping(
+                min_delta = CFG.MIN_DELTA,
+                monitor="val_loss",
+                patience=CFG.PATIENCE,
+                mode="min")]
         )
         trainer.fit(
             model=model,
