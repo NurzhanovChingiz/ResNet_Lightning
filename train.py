@@ -4,7 +4,7 @@ from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from config import CFG
 from utils.trainer import Model
 import time
-from utils.data_preparetion import get_dataset, train_test_val_split
+from utils.data_preparation import get_dataset, train_test_val_split
 from utils.dataset import Dataset
 from torch.utils.data import DataLoader
 
@@ -56,12 +56,10 @@ if __name__ == "__main__":
             model=model,
             train_dataloaders=train_dataloader,
             val_dataloaders=val_dataloader,
-            weights_only=True
             )
         trainer.test(
             model=model,
             dataloaders=test_dataloader,
-            weights_only=True
             )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time

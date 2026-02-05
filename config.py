@@ -39,8 +39,8 @@ class CFG:
     IMAGE_DIR: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
     
     # Data split parameters
-    TEST_SIZE: float = 0.6
-    VAL_SIZE: float = 0.2
+    TEST_SIZE: float = 0.2
+    VAL_SIZE: float = 0.15
     STRATIFY: bool = True
     
     # Directories
@@ -82,7 +82,7 @@ class CFG:
     WEIGHT_DECAY: float = 0.01
     MIN_DELTA: float = 0.001
     PATIENCE: int = 5
-    NUM_WORKERS: int = os.cpu_count() // 2 if nvidia_smi_available else 0
+    NUM_WORKERS: int = (os.cpu_count() or 1) // 2 if nvidia_smi_available else 0
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
     PERSISTENT_WORKERS: bool = False
