@@ -37,9 +37,9 @@ if __name__ == "__main__":
         )
         model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, scheduler=CFG.SCHEDULER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
         
-        # Setup loggers - TensorBoard and CSV for saving to lightning_logs
-        tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs", version="")
-        csv_logger = CSVLogger(save_dir=".", name="lightning_logs", version="")
+        # Setup loggers - TensorBoard and CSV sharing the same auto-incremented version
+        tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs")
+        csv_logger = CSVLogger(save_dir=".", name="lightning_logs", version=tb_logger.version)
         
         trainer = L.Trainer(
             accelerator=CFG.ACCELERATOR,
@@ -59,7 +59,7 @@ if __name__ == "__main__":
                     mode="min",
                     save_top_k=1,
                     filename="best-{epoch}-{val_loss:.6f}",
-                    dirpath="lightning_logs/checkpoints/",
+                    dirpath=None,  # auto-saves to the first logger's version folder
                     verbose=True,
                 )]
         )
