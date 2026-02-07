@@ -17,15 +17,16 @@ class Model(L.LightningModule):
     Returns:
         LightningModule
     '''
-    def __init__(self, model: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, train_transform: Any, test_transform: Any, print_metrics: bool = False):
+    def __init__(self, model: nn.Module, loss_fn: nn.Module, optimizer: torch.optim.Optimizer, scheduler: dict | None = None, train_transform: Any = None, test_transform: Any = None, print_metrics: bool = False):
         super().__init__()
         self.model = model
         self.loss_fn = loss_fn
         self.optimizer = optimizer
+        self.scheduler = scheduler
         self.train_transform = train_transform
         self.test_transform = test_transform
         self.print_metrics = print_metrics
-        self.save_hyperparameters(ignore=['model', 'loss_fn', 'optimizer', 'train_transform', 'test_transform', 'print_metrics'])
+        self.save_hyperparameters(ignore=['model', 'loss_fn', 'optimizer', 'scheduler', 'train_transform', 'test_transform', 'print_metrics'])
         
         # Metrics trackers
         self.train_metrics_tracker = MetricsTracker()
@@ -100,6 +101,8 @@ class Model(L.LightningModule):
         self.test_metrics_tracker.reset()
     
     def configure_optimizers(self):
+        if self.scheduler is not None:
+            return {"optimizer": self.optimizer, "lr_scheduler": self.scheduler}
         return self.optimizer
     
     def validation_step(self, batch, batch_idx):

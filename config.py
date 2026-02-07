@@ -1,5 +1,6 @@
 from utils.clear_gpu import clear_memory
 from utils.set_seed import set_seed
+from utils.scheduler import get_scheduler
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 import os
@@ -8,10 +9,6 @@ from torch.backends import cudnn
 from model import ResNet18
 from typing import Any
 
-# Workaround for ROCm/HIP kernel compatibility issues on newer AMD GPUs
-# Try setting HSA_OVERRIDE_GFX_VERSION if you get "device kernel image is invalid" errors
-# Example: set HSA_OVERRIDE_GFX_VERSION=11.0.0 in your environment before running
-# torch.set_float32_matmul_precision('high')  # Disabled for ROCm compatibility
 
 
 class CFG:
@@ -21,14 +18,14 @@ class CFG:
     nvidia_smi_available = os.system("nvidia-smi") == 0 
     if nvidia_smi_available:
         ACCELERATOR: str = "cuda"
-        DEVICE: torch.device = torch.device("cuda")
+        DEVICE: Any = torch.device("cuda")
         print(f"Using device: {DEVICE}")
-        cudnn.benchmark = True
+        cudnn.benchmark: bool = True
     else:
         ACCELERATOR: str = "cpu"
-        DEVICE: torch.device = torch.device("cpu")
+        DEVICE: Any = torch.device("cpu")
         print(f"Using device: {DEVICE}")
-        cudnn.benchmark = False
+        cudnn.benchmark: bool = False
 
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
@@ -36,7 +33,7 @@ class CFG:
     DOWNLOAD_PATH: str = "data/raw/"
     if not os.path.exists(DOWNLOAD_PATH):
         os.makedirs(DOWNLOAD_PATH)
-    IMAGE_DIR: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
+    DATA: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
     
     # Data split parameters
     TEST_SIZE: float = 0.2
@@ -58,7 +55,7 @@ class CFG:
     COMPILE_MODEL: bool = False
     if COMPILE_MODEL:
         try:
-            MODEL = torch.compile(MODEL,
+            MODEL: Any = torch.compile(MODEL,
                                   fullgraph=True,
                                 #   mode="max-autotune"
                                   )
@@ -75,7 +72,7 @@ class CFG:
     CROP_SIZE: int = IMG_SIZE-32 #224
     
     # Training parameters
-    BATCH_SIZE: int = 128
+    BATCH: int = 128
     EPOCHS: int = 20
     LR: float = 0.001
     EPS: float = 1e-10
@@ -88,10 +85,30 @@ class CFG:
     PERSISTENT_WORKERS: bool = False
 
     # Precision
+    AMP: bool = True
     PRECISION: str = "32-true"
+    # Learning rate scheduler
+    SCHEDULER_TYPE: str = "cosine_warmup"  # Options: cosine_warmup, cosine, step, onecycle
+    WARMUP_EPOCHS: int = 5
+    ETA_MIN: float = 1e-6
+    STEP_SIZE: int = 10
+    GAMMA: float = 0.1
+    MAX_LR: float = LR
+    
+
     # Loss function and optimizer
     LOSS_FN: Any = torch.nn.CrossEntropyLoss()
     OPTIMIZER: Any = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    SCHEDULER: Any = get_scheduler(
+        OPTIMIZER,
+        scheduler_type=SCHEDULER_TYPE,
+        epochs=EPOCHS,
+        warmup_epochs=WARMUP_EPOCHS,
+        eta_min=ETA_MIN,
+        step_size=STEP_SIZE,
+        gamma=GAMMA,
+        max_lr=MAX_LR,
+    )
     
     TRAIN_TRANSFORM: Any = v2.Compose([
         v2.Resize(IMG_SIZE, interpolation=InterpolationMode.BILINEAR, antialias=True),

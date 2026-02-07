@@ -12,7 +12,7 @@ if __name__ == "__main__":
     try:
         start_time = time.perf_counter()
         
-        dataset = get_dataset(CFG.IMAGE_DIR)
+        dataset = get_dataset(CFG.DATA)
 
         train_images, val_images, test_images, train_labels, val_labels, test_labels = train_test_val_split(
             dataset = dataset,
@@ -26,15 +26,15 @@ if __name__ == "__main__":
         test_dataset = Dataset(test_images, test_labels, transform=CFG.TEST_TRANSFORM)
 
         train_dataloader = DataLoader(
-            train_dataset, batch_size=CFG.BATCH_SIZE, shuffle=True, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
+            train_dataset, batch_size=CFG.BATCH, shuffle=True, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
         )
         val_dataloader = DataLoader(
-            val_dataset, batch_size=CFG.BATCH_SIZE, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
+            val_dataset, batch_size=CFG.BATCH, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
         )
         test_dataloader = DataLoader(
             test_dataset, batch_size=1, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
         )
-        model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
+        model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, scheduler=CFG.SCHEDULER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
         
         # Setup loggers - TensorBoard and CSV for saving to lightning_logs
         tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs")
@@ -42,7 +42,7 @@ if __name__ == "__main__":
         
         trainer = L.Trainer(
             accelerator=CFG.ACCELERATOR,
-            precision=CFG.PRECISION,
+            precision=CFG.PRECISION if CFG.AMP else "32-true",
             max_epochs=CFG.EPOCHS,
             logger=[tb_logger, csv_logger],
             enable_progress_bar=True,
