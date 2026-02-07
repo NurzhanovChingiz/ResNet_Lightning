@@ -1,5 +1,6 @@
 import lightning as L
 from lightning.pytorch.callbacks.early_stopping import EarlyStopping
+from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger, CSVLogger
 from config import CFG
 from utils.trainer import Model
@@ -37,8 +38,8 @@ if __name__ == "__main__":
         model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, scheduler=CFG.SCHEDULER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
         
         # Setup loggers - TensorBoard and CSV for saving to lightning_logs
-        tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs")
-        csv_logger = CSVLogger(save_dir=".", name="lightning_logs")
+        tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs", version="")
+        csv_logger = CSVLogger(save_dir=".", name="lightning_logs", version="")
         
         trainer = L.Trainer(
             accelerator=CFG.ACCELERATOR,
@@ -46,21 +47,32 @@ if __name__ == "__main__":
             max_epochs=CFG.EPOCHS,
             logger=[tb_logger, csv_logger],
             enable_progress_bar=True,
-            callbacks=[EarlyStopping(
-                min_delta = CFG.MIN_DELTA,
-                monitor="val_loss",
-                patience=CFG.PATIENCE,
-                mode="min")]
+            callbacks=[
+                EarlyStopping(
+                    min_delta = CFG.MIN_DELTA,
+                    monitor="val_loss",
+                    patience=CFG.PATIENCE,
+                    mode="min"
+                ),
+                ModelCheckpoint(
+                    monitor="val_loss",
+                    mode="min",
+                    save_top_k=1,
+                    filename="best-{epoch}-{val_loss:.6f}",
+                    dirpath="lightning_logs/checkpoints/",
+                    verbose=True,
+                )]
         )
         trainer.fit(
             model=model,
             train_dataloaders=train_dataloader,
             val_dataloaders=val_dataloader,
             )
-        trainer.test(
-            model=model,
-            dataloaders=test_dataloader,
-            )
+        # trainer.test(
+        #     model=model,
+        #     dataloaders=test_dataloader,
+        #     ckpt_path='best',
+        #     )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         print(f"Training completed in {elapsed_time/60:.2f} minutes.")

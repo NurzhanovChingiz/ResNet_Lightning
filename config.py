@@ -21,11 +21,13 @@ class CFG:
         DEVICE: Any = torch.device("cuda")
         print(f"Using device: {DEVICE}")
         cudnn.benchmark: bool = True
+        PERSISTENT_WORKERS: bool = True
     else:
         ACCELERATOR: str = "cpu"
         DEVICE: Any = torch.device("cpu")
         print(f"Using device: {DEVICE}")
         cudnn.benchmark: bool = False
+        PERSISTENT_WORKERS: bool = False
 
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
@@ -73,16 +75,15 @@ class CFG:
     
     # Training parameters
     BATCH: int = 128
-    EPOCHS: int = 20
+    EPOCHS: int = 1
     LR: float = 0.001
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
     MIN_DELTA: float = 0.001
     PATIENCE: int = 5
-    NUM_WORKERS: int = (os.cpu_count() or 1) // 2 if nvidia_smi_available else 0
+    NUM_WORKERS: int = os.cpu_count()
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
-    PERSISTENT_WORKERS: bool = False
 
     # Precision
     AMP: bool = True
