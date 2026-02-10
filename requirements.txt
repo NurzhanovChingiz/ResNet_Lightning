@@ -1,6 +1,3 @@
-# AMD ROCm PyTorch builds (extra index) comment or uncoment
---extra-index-url https://d2awnip2yjpvqn.cloudfront.net/v2/gfx120X-all/
-
 # PyTorch packages (from AMD index)
 torch
 torchvision
@@ -11,4 +8,4 @@ torchmetrics
 kagglehub
 scikit-learn
 lightning
-#pytorch-lightning["extra"]
+# pytorch-lightning["extra"] # manual installation of extra index

@@ -29,7 +29,7 @@ class CFG:
     DATA: str = os.path.join(DOWNLOAD_PATH, 'imagenet1k')
     
     # Data split parameters
-    TEST_SIZE: float = 0.2
+    TEST_SIZE: float = 0.3
     VAL_SIZE: float = 0.15
     STRATIFY: bool = True
     
@@ -71,7 +71,7 @@ class CFG:
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
     MIN_DELTA: float = 0.001
-    PATIENCE: int = 5
+    PATIENCE: int = 4
     
     # DataLoader parameters
     NUM_WORKERS: int = os.cpu_count()

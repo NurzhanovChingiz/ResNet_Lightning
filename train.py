@@ -54,7 +54,16 @@ if __name__ == "__main__":
             worker_init_fn=CFG.SEED_WORKER,
             generator=CFG.GENERATOR,
         )
-        model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, scheduler=CFG.SCHEDULER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
+
+        model = Model(
+            model=CFG.MODEL,
+            loss_fn=CFG.LOSS_FN,
+            optimizer=CFG.OPTIMIZER,
+            scheduler=CFG.SCHEDULER,
+            train_transform=CFG.TRAIN_TRANSFORM,
+            test_transform=CFG.TEST_TRANSFORM,
+            print_metrics=CFG.PRINT_METRICS_TO_TERMINAL
+            )
         
         # Setup loggers - TensorBoard and CSV sharing the same auto-incremented version
         tb_logger = TensorBoardLogger(save_dir=".", name="lightning_logs")
@@ -78,7 +87,7 @@ if __name__ == "__main__":
                     mode="min",
                     save_top_k=1,
                     filename="best-{epoch}-{val_loss:.6f}",
-                    dirpath=None,  # auto-saves to the first logger's version folder
+                    dirpath=None,  # tb_logger.version folder
                     verbose=True,
                 )]
         )
@@ -87,11 +96,10 @@ if __name__ == "__main__":
             train_dataloaders=train_dataloader,
             val_dataloaders=val_dataloader,
             )
-        # trainer.test(
-        #     model=model,
-        #     dataloaders=test_dataloader,
-        #     ckpt_path='best',
-        #     )
+        trainer.test(
+            model=model,
+            dataloaders=test_dataloader,
+            )
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         print(f"Training completed in {elapsed_time/60:.2f} minutes.")
