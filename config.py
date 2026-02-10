@@ -1,5 +1,5 @@
 from utils.clear_gpu import clear_memory
-from utils.set_seed import set_seed
+from utils.set_seed import set_seed, seed_worker, get_generator
 from utils.scheduler import get_scheduler
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
@@ -15,20 +15,11 @@ class CFG:
     SEED: int = 137
     set_seed(SEED)
     clear_memory()
-    nvidia_smi_available = os.system("nvidia-smi") == 0 
-    if nvidia_smi_available:
-        ACCELERATOR: str = "cuda"
-        DEVICE: Any = torch.device("cuda")
-        print(f"Using device: {DEVICE}")
-        cudnn.benchmark: bool = True
-        PERSISTENT_WORKERS: bool = True
-    else:
-        ACCELERATOR: str = "cpu"
-        DEVICE: Any = torch.device("cpu")
-        print(f"Using device: {DEVICE}")
-        cudnn.benchmark: bool = False
-        PERSISTENT_WORKERS: bool = False
 
+    ACCELERATOR: str = "auto"
+    DEVICE: Any = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cudnn.benchmark: bool = False
+    
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
     DATASET_ID: str = "vitaliykinakh/stable-imagenet1k"
@@ -54,7 +45,7 @@ class CFG:
     
     # Compile
     # NOTE: torch.compile() is disabled because ROCm/HIP has limited support for it
-    COMPILE_MODEL: bool = False
+    COMPILE_MODEL: bool = True
     if COMPILE_MODEL:
         try:
             MODEL: Any = torch.compile(MODEL,
@@ -75,19 +66,25 @@ class CFG:
     
     # Training parameters
     BATCH: int = 128
-    EPOCHS: int = 1
-    LR: float = 0.001
+    EPOCHS: int = 50
+    LR: float = 0.003
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
     MIN_DELTA: float = 0.001
     PATIENCE: int = 5
+    
+    # DataLoader parameters
     NUM_WORKERS: int = os.cpu_count()
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
-
+    PERSISTENT_WORKERS: bool = True
+    SEED_WORKER: Any = seed_worker
+    GENERATOR: Any = get_generator(SEED)
+    
     # Precision
     AMP: bool = True
-    PRECISION: str = "32-true"
+    PRECISION: str = "bf16-true"
+    
     # Learning rate scheduler
     SCHEDULER_TYPE: str = "cosine_warmup"  # Options: cosine_warmup, cosine, step, onecycle
     WARMUP_EPOCHS: int = 5
@@ -96,10 +93,9 @@ class CFG:
     GAMMA: float = 0.1
     MAX_LR: float = LR
     
-
     # Loss function and optimizer
     LOSS_FN: Any = torch.nn.CrossEntropyLoss()
-    OPTIMIZER: Any = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    OPTIMIZER: Any = torch.optim.AdamW(MODEL.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, eps=EPS)
     SCHEDULER: Any = get_scheduler(
         OPTIMIZER,
         scheduler_type=SCHEDULER_TYPE,

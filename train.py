@@ -27,13 +27,32 @@ if __name__ == "__main__":
         test_dataset = Dataset(test_images, test_labels, transform=CFG.TEST_TRANSFORM)
 
         train_dataloader = DataLoader(
-            train_dataset, batch_size=CFG.BATCH, shuffle=True, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
+            train_dataset, batch_size=CFG.BATCH,
+            shuffle=True,
+            num_workers=CFG.NUM_WORKERS,
+            pin_memory=CFG.PIN_MEMORY,
+            persistent_workers=CFG.PERSISTENT_WORKERS,
+            worker_init_fn=CFG.SEED_WORKER,
+            generator=CFG.GENERATOR,
         )
         val_dataloader = DataLoader(
-            val_dataset, batch_size=CFG.BATCH, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
+            val_dataset, batch_size=CFG.BATCH,
+            shuffle=False,
+            num_workers=CFG.NUM_WORKERS,
+            pin_memory=CFG.PIN_MEMORY,
+            persistent_workers=CFG.PERSISTENT_WORKERS,
+            worker_init_fn=CFG.SEED_WORKER,
+            generator=CFG.GENERATOR,
         )
         test_dataloader = DataLoader(
-            test_dataset, batch_size=1, shuffle=False, num_workers=CFG.NUM_WORKERS, pin_memory=CFG.PIN_MEMORY, persistent_workers=CFG.PERSISTENT_WORKERS
+            test_dataset,
+            batch_size=1,
+            shuffle=False,
+            num_workers=CFG.NUM_WORKERS,
+            pin_memory=CFG.PIN_MEMORY,
+            persistent_workers=CFG.PERSISTENT_WORKERS,
+            worker_init_fn=CFG.SEED_WORKER,
+            generator=CFG.GENERATOR,
         )
         model = Model(model=CFG.MODEL, loss_fn=CFG.LOSS_FN, optimizer=CFG.OPTIMIZER, scheduler=CFG.SCHEDULER, train_transform=CFG.TRAIN_TRANSFORM, test_transform=CFG.TEST_TRANSFORM, print_metrics=CFG.PRINT_METRICS_TO_TERMINAL)
         
