@@ -1,4 +1,4 @@
-import kagglehub
+import kagglehub  # type: ignore[import-untyped]
 import shutil
 from pathlib import Path
 

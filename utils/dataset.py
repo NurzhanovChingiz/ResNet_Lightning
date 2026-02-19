@@ -4,7 +4,7 @@ from typing import Any
 import torch
 
 
-class Dataset(Dataset):  # type: ignore[no-redef]
+class ImageDataset(Dataset):
     def __init__(self, data: list[str], labels: list[int], transform: Any = None) -> None:
         self.data = data
         self.labels = labels

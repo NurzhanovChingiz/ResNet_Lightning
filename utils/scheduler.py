@@ -2,6 +2,7 @@ import torch
 from torch.optim.lr_scheduler import (
     CosineAnnealingLR,
     LinearLR,
+    LRScheduler,
     SequentialLR,
     StepLR,
     OneCycleLR,
@@ -49,7 +50,7 @@ def get_scheduler(
             T_max=epochs - warmup_epochs,
             eta_min=eta_min,
         )
-        scheduler = SequentialLR(
+        scheduler: LRScheduler = SequentialLR(
             optimizer,
             schedulers=[warmup, cosine],
             milestones=[warmup_epochs],

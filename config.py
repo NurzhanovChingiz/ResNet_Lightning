@@ -1,13 +1,13 @@
 from utils.clear_gpu import clear_memory
 from utils.set_seed import set_seed, seed_worker, get_generator
 from utils.scheduler import get_scheduler
-from torchvision.transforms import v2
-from torchvision.transforms.functional import InterpolationMode
+from torchvision.transforms import v2  # type: ignore[import-untyped]
+from torchvision.transforms.functional import InterpolationMode  # type: ignore[import-untyped]
 import os
 import torch
 from torch.backends import cudnn
 from model import ResNet18
-from typing import Any
+from typing import Any, Literal
 
 
 
@@ -18,7 +18,7 @@ class CFG:
 
     ACCELERATOR: str = "auto"
     DEVICE: Any = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cudnn.benchmark: bool = False
+    cudnn.benchmark = False
     
     # Dataset parameters
     # https://www.kaggle.com/datasets/vitaliykinakh/stable-imagenet1k
@@ -48,7 +48,7 @@ class CFG:
     COMPILE_MODEL: bool = True
     if COMPILE_MODEL:
         try:
-            MODEL: Any = torch.compile(MODEL,
+            MODEL = torch.compile(MODEL,
                                   fullgraph=True,
                                 #   mode="max-autotune"
                                   )
@@ -57,7 +57,7 @@ class CFG:
             
     # Metrics      
     PRINT_METRICS_TO_TERMINAL: bool = True
-    TASK: str = "multiclass"  
+    TASK: Literal["binary", "multiclass", "multilabel"] = "multiclass"  
     NUM_CLASSES: int = 1000 
     
     # Image parameters
@@ -74,7 +74,7 @@ class CFG:
     PATIENCE: int = 4
     
     # DataLoader parameters
-    NUM_WORKERS: int = os.cpu_count()
+    NUM_WORKERS: int = os.cpu_count() or 1
     print(f"Using {NUM_WORKERS} DataLoader workers.")
     PIN_MEMORY: bool = True
     PERSISTENT_WORKERS: bool = True
@@ -83,7 +83,7 @@ class CFG:
     
     # Precision
     AMP: bool = True
-    PRECISION: str = "bf16-true"
+    PRECISION: Literal["transformer-engine", "transformer-engine-float16", "16-true", "16-mixed", "bf16-true", "bf16-mixed", "32-true", "64-true", "64", "32", "16", "bf16"] = "bf16-true"
     
     # Learning rate scheduler
     SCHEDULER_TYPE: str = "cosine_warmup"  # Options: cosine_warmup, cosine, step, onecycle

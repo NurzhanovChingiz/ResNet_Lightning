@@ -1,7 +1,7 @@
-from sklearn.model_selection import train_test_split
-from torchvision.datasets import ImageFolder
+from sklearn.model_selection import train_test_split  # type: ignore[import-untyped]
+from torchvision.datasets import ImageFolder  # type: ignore[import-untyped]
 
-def get_dataset(folder: str) -> list[str]:
+def get_dataset(folder: str) -> ImageFolder:
     '''
     Gets the dataset images and labels map from the specified folder.
     Args: 

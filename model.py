@@ -67,7 +67,7 @@ class BasicBlock(nn.Module):
         out += identity
         out = self.relu(out)
 
-        return out
+        return out  # type: ignore[no-any-return]
     
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
@@ -124,7 +124,7 @@ class Bottleneck(nn.Module):
         out += identity
         out = self.relu(out)
 
-        return out
+        return out  # type: ignore[no-any-return]
     
 class ResNet(nn.Module):
     def __init__(
@@ -247,7 +247,7 @@ class ResNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
-from torchvision.models._api import WeightsEnum
+from torchvision.models._api import WeightsEnum  # type: ignore[import-untyped]
     
 class ResNet18(ResNet):
     def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:

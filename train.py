@@ -6,7 +6,7 @@ from config import CFG
 from utils.trainer import Model
 import time
 from utils.data_preparation import get_dataset, train_test_val_split
-from utils.dataset import Dataset
+from utils.dataset import ImageDataset
 from torch.utils.data import DataLoader
 
 if __name__ == "__main__":
@@ -22,9 +22,9 @@ if __name__ == "__main__":
             random_state = CFG.SEED,
             stratify = CFG.STRATIFY
             )
-        train_dataset = Dataset(train_images, train_labels, transform=CFG.TRAIN_TRANSFORM)
-        val_dataset = Dataset(val_images, val_labels, transform=CFG.TEST_TRANSFORM)
-        test_dataset = Dataset(test_images, test_labels, transform=CFG.TEST_TRANSFORM)
+        train_dataset = ImageDataset(train_images, train_labels, transform=CFG.TRAIN_TRANSFORM)
+        val_dataset = ImageDataset(val_images, val_labels, transform=CFG.TEST_TRANSFORM)
+        test_dataset = ImageDataset(test_images, test_labels, transform=CFG.TEST_TRANSFORM)
 
         train_dataloader = DataLoader(
             train_dataset, batch_size=CFG.BATCH,
@@ -46,7 +46,7 @@ if __name__ == "__main__":
         )
         test_dataloader = DataLoader(
             test_dataset,
-            batch_size=1,
+            batch_size=CFG.BATCH,
             shuffle=False,
             num_workers=CFG.NUM_WORKERS,
             pin_memory=CFG.PIN_MEMORY,
@@ -62,7 +62,9 @@ if __name__ == "__main__":
             scheduler=CFG.SCHEDULER,
             train_transform=CFG.TRAIN_TRANSFORM,
             test_transform=CFG.TEST_TRANSFORM,
-            print_metrics=CFG.PRINT_METRICS_TO_TERMINAL
+            print_metrics=CFG.PRINT_METRICS_TO_TERMINAL,
+            task=CFG.TASK,
+            num_classes=CFG.NUM_CLASSES,
             )
         
         # Setup loggers - TensorBoard and CSV sharing the same auto-incremented version
@@ -107,7 +109,7 @@ if __name__ == "__main__":
         print(f"An error occurred during training: {e}")
         
     finally:
-        train_dataloader = None
-        val_dataloader = None
-        test_dataloader = None
+        train_dataloader = None  # type: ignore[assignment]
+        val_dataloader = None  # type: ignore[assignment]
+        test_dataloader = None  # type: ignore[assignment]
         
