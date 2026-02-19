@@ -73,7 +73,7 @@ def load_metrics(csv_path: str | None = None) -> dict[str, pd.DataFrame]:
 
 # ── Individual plotters ─────────────────────────────────────────────────────
 
-def _style_ax(ax: plt.Axes, title: str, ylabel: str, xlabel: str = "Epoch"):
+def _style_ax(ax: plt.Axes, title: str, ylabel: str, xlabel: str = "Epoch") -> None:
     """Apply consistent styling to an Axes."""
     ax.set_title(title, fontsize=13, fontweight="bold", pad=10)
     ax.set_xlabel(xlabel, fontsize=11)
@@ -291,7 +291,7 @@ def plot_dashboard(
         plt.close(fig)
 
 
-def _draw_summary_table(ax: plt.Axes, metrics: dict[str, pd.DataFrame]):
+def _draw_summary_table(ax: plt.Axes, metrics: dict[str, pd.DataFrame]) -> None:
     """Draw a summary table with best/final metrics on the given axes."""
     train, val, test = metrics["train"], metrics["val"], metrics["test"]
 

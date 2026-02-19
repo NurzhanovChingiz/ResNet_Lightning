@@ -1,5 +1,7 @@
+import torch.nn as nn
 
-def summary(model):
+
+def summary(model: nn.Module) -> None:
     """
     Print information about the model
     

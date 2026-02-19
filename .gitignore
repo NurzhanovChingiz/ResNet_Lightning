@@ -5,5 +5,8 @@ __pycache__/
 /data/
 /imagenet1k/
 /lightning_logs/
+
+# mypy
+.mypy_cache/
 # saved outputs
 /output/

@@ -1,18 +1,20 @@
 from torch.utils.data import Dataset
 from PIL import Image
+from typing import Any
+import torch
 
-class Dataset(Dataset):
-    def __init__(self, data, labels, transform=None):
+
+class Dataset(Dataset):  # type: ignore[no-redef]
+    def __init__(self, data: list[str], labels: list[int], transform: Any = None) -> None:
         self.data = data
         self.labels = labels
         self.transform = transform
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.data)
 
-    def __getitem__(self, idx):
-        sample = self.data[idx]
-        sample = Image.open(sample).convert("RGB")
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor | Image.Image, int]:
+        sample: Image.Image | torch.Tensor = Image.open(self.data[idx]).convert("RGB")
         
         label = self.labels[idx]
         if self.transform:

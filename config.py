@@ -61,7 +61,7 @@ class CFG:
     NUM_CLASSES: int = 1000 
     
     # Image parameters
-    IMG_SIZE: int = 128
+    IMG_SIZE: int = 256
     CROP_SIZE: int = IMG_SIZE-32 #224
     
     # Training parameters

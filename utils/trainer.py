@@ -33,7 +33,7 @@ class Model(L.LightningModule):
         self.val_metrics_tracker = MetricsTracker()
         self.test_metrics_tracker = MetricsTracker()
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Any:
         x, y = batch
         y_hat = self.model(x)
         loss = self.loss_fn(y_hat, y)
@@ -47,7 +47,7 @@ class Model(L.LightningModule):
         
         return loss
     
-    def on_train_epoch_end(self):
+    def on_train_epoch_end(self) -> None:
         # Compute and log epoch metrics
         train_metrics = self.train_metrics_tracker.compute()
         self.log('train_loss', self.train_metrics_tracker.get_metric('avg_loss').compute().item(), on_step=False, on_epoch=True, prog_bar=True, logger=True)
@@ -64,7 +64,7 @@ class Model(L.LightningModule):
         # Reset metrics
         self.train_metrics_tracker.reset()
     
-    def on_validation_epoch_end(self):
+    def on_validation_epoch_end(self) -> None:
         # Compute and log epoch metrics
         val_metrics = self.val_metrics_tracker.compute()
         
@@ -82,7 +82,7 @@ class Model(L.LightningModule):
         # Reset metrics
         self.val_metrics_tracker.reset()
     
-    def on_test_epoch_end(self):
+    def on_test_epoch_end(self) -> None:
         # Compute and log epoch metrics
         test_metrics = self.test_metrics_tracker.compute()
 
@@ -100,12 +100,12 @@ class Model(L.LightningModule):
         # Reset metrics
         self.test_metrics_tracker.reset()
     
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> Any:
         if self.scheduler is not None:
             return {"optimizer": self.optimizer, "lr_scheduler": self.scheduler}
         return self.optimizer
     
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Any:
         x, y = batch
         y_hat = self.model(x)
         loss = self.loss_fn(y_hat, y)
@@ -116,7 +116,7 @@ class Model(L.LightningModule):
         
         return loss
     
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Any:
         x, y = batch
         y_hat = self.model(x)
         loss = self.loss_fn(y_hat, y)

@@ -1,3 +1,5 @@
+from typing import cast
+
 import torch
 from torchmetrics import (
     MeanMetric,
@@ -5,16 +7,17 @@ from torchmetrics import (
     Precision,
     Recall,
     F1Score,
-    
+    Metric,
 )
 
 from config import CFG
 from torchmetrics.aggregation import BaseAggregator
 
-def suppress_nan_check(MetricClass):
+
+def suppress_nan_check(MetricClass: type[BaseAggregator]) -> type:
     assert issubclass(MetricClass, BaseAggregator), MetricClass
-    class DisableNanCheck(MetricClass):
-        def _cast_and_nan_check_input(self, x, weight=None):
+    class DisableNanCheck(MetricClass):  # type: ignore[valid-type, misc]
+        def _cast_and_nan_check_input(self, x: torch.Tensor | float, weight: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
             if not isinstance(x, torch.Tensor):
                 x = torch.as_tensor(x)
             x = x.to(device=self.device, dtype=self.dtype)
@@ -27,7 +30,7 @@ def suppress_nan_check(MetricClass):
     return DisableNanCheck
 
 class MetricsTracker(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         NoNanMeanMetric = suppress_nan_check(MeanMetric)
         self.metrics = torch.nn.ModuleDict({
@@ -39,32 +42,34 @@ class MetricsTracker(torch.nn.Module):
             "f1_score": F1Score(task=CFG.TASK, num_classes=CFG.NUM_CLASSES, average='macro'),
         })
     
-    def update_metrics(self, preds, targets):
-        self.metrics["accuracy_top1"].update(preds, targets)
-        self.metrics["accuracy_top5"].update(preds, targets)
-        self.metrics["precision"].update(preds, targets)
-        self.metrics["recall"].update(preds, targets)
-        self.metrics["f1_score"].update(preds, targets)
-        
-    def update_loss(self, loss_value):
-        loss_value = torch.as_tensor(loss_value, dtype=self.metrics["avg_loss"].dtype, device=CFG.DEVICE)
-        self.metrics["avg_loss"].update(loss_value, weight=torch.ones_like(loss_value))
-        
-    def compute(self):
-        return {name: metric.compute().item() for name, metric in self.metrics.items()}
+    def _metric(self, name: str) -> Metric:
+        return cast(Metric, self.metrics[name])
 
-    def reset(self):
+    def update_metrics(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
+        self._metric("accuracy_top1").update(preds, targets)
+        self._metric("accuracy_top5").update(preds, targets)
+        self._metric("precision").update(preds, targets)
+        self._metric("recall").update(preds, targets)
+        self._metric("f1_score").update(preds, targets)
+
+    def update_loss(self, loss_value: float) -> None:
+        avg_loss = cast(MeanMetric, self.metrics["avg_loss"])
+        loss_tensor = torch.as_tensor(loss_value, dtype=avg_loss.dtype, device=CFG.DEVICE)
+        avg_loss.update(loss_tensor, weight=torch.ones_like(loss_tensor))
+
+    def compute(self) -> dict[str, float]:
+        return {name: cast(Metric, m).compute().item() for name, m in self.metrics.items()}
+
+    def reset(self) -> None:
         for metric in self.metrics.values():
-            metric.reset()
+            cast(Metric, metric).reset()
             
         
-    def get_metric(self, name: str):
-        return self.metrics[name]
+    def get_metric(self, name: str) -> Metric:
+        return cast(Metric, self.metrics[name])
     
-    def print_metrics(self):
-        # Check if any updates have been made before computing
-        # MeanMetric uses mean_value as state, classification metrics use preds/target
-        avg_loss_metric = self.metrics["avg_loss"]
+    def print_metrics(self) -> None:
+        avg_loss_metric = cast(MeanMetric, self.metrics["avg_loss"])
         if avg_loss_metric.weight.sum() == 0:
             # No updates have been made, skip printing
             return 

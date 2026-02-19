@@ -255,8 +255,8 @@ class ResNet18(ResNet):
         if pretrained:
             self._pretrained()
             if num_classes != 1000:
-                in_features = self.classifier[-1].in_features
-                self.classifier[-1] = nn.Linear(in_features, num_classes)
+                in_features = self.fc.in_features
+                self.fc = nn.Linear(in_features, num_classes)
     def _pretrained(self) -> None:
         state_dict = nn.Module.state_dict(self)
         pretrained_dict = torch.hub.load_state_dict_from_url(
@@ -276,8 +276,8 @@ class ResNet34(ResNet):
         if pretrained:
             self._pretrained()
             if num_classes != 1000:
-                in_features = self.classifier[-1].in_features
-                self.classifier[-1] = nn.Linear(in_features, num_classes)
+                in_features = self.fc.in_features
+                self.fc = nn.Linear(in_features, num_classes)
     def _pretrained(self) -> None:
         state_dict = nn.Module.state_dict(self)
         pretrained_dict = torch.hub.load_state_dict_from_url(
@@ -297,8 +297,8 @@ class ResNet50(ResNet):
         if pretrained:
             self._pretrained()
             if num_classes != 1000:
-                in_features = self.classifier[-1].in_features
-                self.classifier[-1] = nn.Linear(in_features, num_classes)
+                in_features = self.fc.in_features
+                self.fc = nn.Linear(in_features, num_classes)
     def _pretrained(self) -> None:
         state_dict = nn.Module.state_dict(self)
         pretrained_dict = torch.hub.load_state_dict_from_url(
@@ -318,8 +318,8 @@ class ResNet101(ResNet):
         if pretrained:
             self._pretrained()
             if num_classes != 1000:
-                in_features = self.classifier[-1].in_features
-                self.classifier[-1] = nn.Linear(in_features, num_classes)
+                in_features = self.fc.in_features
+                self.fc = nn.Linear(in_features, num_classes)
     def _pretrained(self) -> None:
         state_dict = nn.Module.state_dict(self)
         pretrained_dict = torch.hub.load_state_dict_from_url(
@@ -339,8 +339,8 @@ class ResNet152(ResNet):
         if pretrained:
             self._pretrained()
             if num_classes != 1000:
-                in_features = self.classifier[-1].in_features
-                self.classifier[-1] = nn.Linear(in_features, num_classes)
+                in_features = self.fc.in_features
+                self.fc = nn.Linear(in_features, num_classes)
     def _pretrained(self) -> None:
         state_dict = nn.Module.state_dict(self)
         pretrained_dict = torch.hub.load_state_dict_from_url(
