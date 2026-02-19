@@ -44,7 +44,6 @@ class CFG:
     MODEL: Any = ResNet18(num_classes=1000, pretrained=PRETRAIN)
     
     # Compile
-    # NOTE: torch.compile() is disabled because ROCm/HIP has limited support for it
     COMPILE_MODEL: bool = True
     if COMPILE_MODEL:
         try:
@@ -108,12 +107,21 @@ class CFG:
     )
     
     TRAIN_TRANSFORM: Any = v2.Compose([
+        # Standard data augmentation
+        v2.RandomHorizontalFlip(p=0.5),
+        v2.RandomRotation(degrees=10),
+        v2.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        # Fast data augmentation
+        v2.RandomInvert(p=0.2),
+        # Resize and crop
         v2.Resize(IMG_SIZE, interpolation=InterpolationMode.BILINEAR, antialias=True),
         v2.CenterCrop(CROP_SIZE),
+        
+        # Convert to Tensor and normalize
         v2.ToImage(),  # ensures Tensor image; works for PIL/ndarray too
         v2.ToDtype(torch.float, scale=True),  # like convert_image_dtype(..., torch.float)
-        v2.Normalize(mean=(0.485, 0.456, 0.406),
-                     std=(0.229, 0.224, 0.225)),
+        v2.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+        v2.RandomErasing()
     ])
         
     TEST_TRANSFORM: Any = v2.Compose([
