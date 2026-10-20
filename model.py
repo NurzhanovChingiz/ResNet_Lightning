@@ -64,6 +64,7 @@ class BasicBlock(nn.Module):
         stride: int = 1,
         downsample: nn.Module | None = None,
         groups: int = 1,
+        *,
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Callable[..., nn.Module] | None = None,
@@ -160,6 +161,7 @@ class Bottleneck(nn.Module):
         stride: int = 1,
         downsample: nn.Module | None = None,
         groups: int = 1,
+        *,
         base_width: int = 64,
         dilation: int = 1,
         norm_layer: Callable[..., nn.Module] | None = None,
@@ -247,6 +249,7 @@ class ResNet(nn.Module):
         block: type[BasicBlock | Bottleneck],
         layers: list[int],
         num_classes: int = 1000,
+        *,
         zero_init_residual: bool = False,
         groups: int = 1,
         width_per_group: int = 64,
@@ -396,9 +399,9 @@ class ResNet(nn.Module):
                 stride,
                 downsample,
                 self.groups,
-                self.base_width,
-                previous_dilation,
-                norm_layer,
+                base_width=self.base_width,
+                dilation=previous_dilation,
+                norm_layer=norm_layer,
             )
         )
         self.inplanes = planes * block.expansion
@@ -515,7 +518,7 @@ class ResNet(nn.Module):
 class ResNet18(ResNet):
     """ResNet-18 with BasicBlock stages ``[2, 2, 2, 2]``."""
 
-    def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:
+    def __init__(self, num_classes: int = 1000, *, pretrained: bool = False) -> None:
         """Build ResNet-18 and optionally load a torchvision checkpoint.
 
         Args:
@@ -536,7 +539,7 @@ class ResNet18(ResNet):
 class ResNet34(ResNet):
     """ResNet-34 with BasicBlock stages ``[3, 4, 6, 3]``."""
 
-    def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:
+    def __init__(self, num_classes: int = 1000, *, pretrained: bool = False) -> None:
         """Build ResNet-34 and optionally load a torchvision checkpoint.
 
         Args:
@@ -557,7 +560,7 @@ class ResNet34(ResNet):
 class ResNet50(ResNet):
     """ResNet-50 with Bottleneck stages ``[3, 4, 6, 3]``."""
 
-    def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:
+    def __init__(self, num_classes: int = 1000, *, pretrained: bool = False) -> None:
         """Build ResNet-50 and optionally load a torchvision checkpoint.
 
         Args:
@@ -578,7 +581,7 @@ class ResNet50(ResNet):
 class ResNet101(ResNet):
     """ResNet-101 with Bottleneck stages ``[3, 4, 23, 3]``."""
 
-    def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:
+    def __init__(self, num_classes: int = 1000, *, pretrained: bool = False) -> None:
         """Build ResNet-101 and optionally load a torchvision checkpoint.
 
         Args:
@@ -601,7 +604,7 @@ class ResNet101(ResNet):
 class ResNet152(ResNet):
     """ResNet-152 with Bottleneck stages ``[3, 8, 36, 3]``."""
 
-    def __init__(self, num_classes: int = 1000, pretrained: bool = False) -> None:
+    def __init__(self, num_classes: int = 1000, *, pretrained: bool = False) -> None:
         """Build ResNet-152 and optionally load a torchvision checkpoint.
 
         Args:

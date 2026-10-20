@@ -1,20 +1,53 @@
 """Import-time training configuration and named setup operations."""
 
+from __future__ import annotations
+
+import logging
 import os
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import torch
-from torch.backends import cudnn
 from torchvision.transforms import v2
 from torchvision.transforms.functional import InterpolationMode
 
 from model import ResNet18
 from utils.clear_gpu import clear_memory
-from utils.device import enable_medium_float32_matmul_precision, resolve_gpu_runtime
+from utils.device import (
+    disable_cudnn_benchmark,
+    enable_medium_float32_matmul_precision,
+    resolve_gpu_runtime,
+)
 from utils.leafspec_warnings import silence_leafspec_deprecation
-from utils.rocm_kernel_logs import silence_rocm_kernel_logs
+from utils.rocm_kernel_logs import (
+    disable_miopen_winograd_fury_solvers,
+    silence_rocm_kernel_logs,
+    use_miopen_fast_find_mode,
+)
 from utils.scheduler import get_scheduler
 from utils.set_seed import set_seed
+
+if TYPE_CHECKING:
+    from typing import Literal
+
+    from utils.metrics import MetricTask
+
+    PrecisionName = Literal[
+        "transformer-engine",
+        "transformer-engine-float16",
+        "16-true",
+        "16-mixed",
+        "bf16-true",
+        "bf16-mixed",
+        "32-true",
+        "64-true",
+        "64",
+        "32",
+        "16",
+        "bf16",
+    ]
+
+LOGGER = logging.getLogger(__name__)
 
 
 def prepare_runtime(seed: int) -> tuple[str, torch.device]:
@@ -25,10 +58,12 @@ def prepare_runtime(seed: int) -> tuple[str, torch.device]:
         settings for the training process.
 
     Strategy:
-        Quiet ROCm CK host dumps, ignore the LeafSpec pytree deprecation,
-        apply the seed and clear cached GPU memory, resolve the Lightning
-        accelerator pair, print the selected device, then enable medium
-        float32 matmul precision and cuDNN benchmarking.
+        Quiet ROCm CK host dumps, disable MIOpen Winograd Fury solvers,
+        switch MIOpen to FAST find, ignore the LeafSpec pytree
+        deprecation, apply the seed and clear cached GPU memory, resolve
+        the Lightning accelerator pair, log the selected device, then
+        enable medium float32 matmul precision and disable cuDNN/MIOpen
+        convolution autotune.
 
     Args:
         seed: Integer seed stored on ``CFG.SEED``.
@@ -38,26 +73,34 @@ def prepare_runtime(seed: int) -> tuple[str, torch.device]:
 
     Flow:
         1. Quiet ROCm kernel host logs
-        2. Ignore LeafSpec pytree deprecation
-        3. Seed and clear memory
-        4. Resolve and announce GPU runtime
-        5. Enable GPU math settings
-        6. Return accelerator and device
+        2. Disable Winograd Fury convolution solvers
+        3. Use MIOpen FAST find mode
+        4. Ignore LeafSpec pytree deprecation
+        5. Seed and clear memory
+        6. Resolve and announce GPU runtime
+        7. Enable GPU math settings
+        8. Return accelerator and device
     """
     # 1. Quiet ROCm kernel host logs
     silence_rocm_kernel_logs()
-    # 2. Ignore LeafSpec pytree deprecation
+    # 2. Disable Winograd Fury convolution solvers
+    disable_miopen_winograd_fury_solvers()
+    # 3. Use MIOpen FAST find mode
+    use_miopen_fast_find_mode()
+    # 4. Ignore LeafSpec pytree deprecation
     silence_leafspec_deprecation()
-    # 3. Seed and clear memory
+    # 5. Seed and clear memory
     set_seed(seed)
     clear_memory()
-    # 4. Resolve and announce GPU runtime
+    # 6. Resolve and announce GPU runtime
+    if not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO)
     accelerator, device = resolve_gpu_runtime()
-    print(f"Using device: {device}")
-    # 5. Enable GPU math settings
+    LOGGER.info("Using device: %s", device)
+    # 7. Enable GPU math settings
     enable_medium_float32_matmul_precision()
-    cudnn.benchmark = True
-    # 6. Return accelerator and device
+    disable_cudnn_benchmark()
+    # 8. Return accelerator and device
     return accelerator, device
 
 
@@ -70,8 +113,7 @@ def ensure_download_path(path: str) -> None:
     Returns:
         None. Creates the directory in place when it is absent.
     """
-    if not os.path.exists(path):
-        os.makedirs(path)
+    Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def build_resnet18(
@@ -88,7 +130,7 @@ def build_resnet18(
     Strategy:
         Build ResNet18 with the requested class count and pretrained flag.
         When compile is requested, try ``torch.compile`` and keep the eager
-        model if compilation fails.
+        model if compilation raises ``RuntimeError``.
 
     Args:
         num_classes: Classification head width.
@@ -112,10 +154,12 @@ def build_resnet18(
             model = torch.compile(
                 model,
                 fullgraph=True,
-                #   mode="max-autotune"
             )
-        except Exception as e:
-            print(f"Warning: torch.compile() disabled (fallback to eager). Reason: {e}")
+        except RuntimeError as exc:
+            LOGGER.warning(
+                "torch.compile() disabled (fallback to eager). Reason: %s",
+                exc,
+            )
     # 3. Return the model
     return model
 
@@ -237,7 +281,7 @@ class CFG:
     DATASET_ID: str = "vitaliykinakh/stable-imagenet1k"
     DOWNLOAD_PATH: str = "data/raw/"
     ensure_download_path(DOWNLOAD_PATH)
-    DATA: str = os.path.join(DOWNLOAD_PATH, "imagenet1k")
+    DATA: str = str(Path(DOWNLOAD_PATH) / "imagenet1k")
 
     # Data split parameters
     TEST_SIZE: float = 0.2
@@ -245,7 +289,7 @@ class CFG:
     STRATIFY: bool = True
 
     # Directories
-    MAIN_DIR: str = os.getcwd()
+    MAIN_DIR: str = str(Path.cwd())
     BASE_DIR: str = f"{MAIN_DIR}/data"  # Must be pre-downloaded
 
     # Model parameters
@@ -256,7 +300,7 @@ class CFG:
 
     # Metrics
     PRINT_METRICS_TO_TERMINAL: bool = True
-    TASK: str = "multiclass"
+    TASK: MetricTask = "multiclass"
     NUM_CLASSES: int = 1000
 
     # Image parameters
@@ -265,19 +309,19 @@ class CFG:
 
     # Training parameters
     BATCH: int = 128
-    EPOCHS: int = 1
-    LR: float = 0.001
+    EPOCHS: int = 10
+    LR: float = 0.003
     EPS: float = 1e-10
     WEIGHT_DECAY: float = 0.01
     MIN_DELTA: float = 0.001
     PATIENCE: int = 5
-    NUM_WORKERS: int = os.cpu_count()
-    print(f"Using {NUM_WORKERS} DataLoader workers.")
+    NUM_WORKERS: int = os.cpu_count() or 1
+    LOGGER.info("Using %s DataLoader workers.", NUM_WORKERS)
     PIN_MEMORY: bool = True
 
     # Precision
     AMP: bool = True
-    PRECISION: str = "bf16-mixed"  # 32-true, bf16-mixed, 16-mixedrue
+    PRECISION: PrecisionName = "bf16-mixed"
     # Learning rate scheduler
     SCHEDULER_TYPE: str = (
         "cosine_warmup"  # Options: cosine_warmup, cosine, step, onecycle

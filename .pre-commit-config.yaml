@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  # - repo: https://github.com/astral-sh/uv-pre-commit
+  #   # uv version.
+  #   rev: 0.10.11
+  #   hooks:
+  #     - id: uv-lock
+
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+
+      - id: ruff-format
+        name: ruff-format
+        language: system
+        entry: uv run ruff format
+        types: [python]
+
+      - id: mypy
+        name: mypy via uv
+        entry: uv run python -m mypy
+        language: system
+        types: [python]
+
+      - id: xenon
+        name: xenon (complexity)
+        entry: uv run xenon --max-absolute B --max-average A --max-modules B
+        language: system
+        types: [python]
+        # Average rank is computed per invocation; parallel file batches make
+        # --max-average flake even when the full staged set is fine.
+        require_serial: true

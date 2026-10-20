@@ -15,6 +15,13 @@ _QUIET_VALUES = {
     "MIOPEN_LOG_LEVEL": "1",
     "ROCBLAS_LAYER": "0",
 }
+_WINOGRAD_FURY_DISABLE_VALUES = {
+    "MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3": "0",
+    "MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2": "0",
+}
+_FAST_FIND_MODE_VALUES = {
+    "MIOPEN_FIND_MODE": "2",
+}
 _GRID_DESC_MARKERS = ("_grid_desc_", "_container_")
 _INSTALLED_STREAM_FILTERS: list[bool] = []
 
@@ -29,6 +36,42 @@ def is_ck_grid_desc_line(line: str) -> bool:
         True if the line matches CK ``*_grid_desc_*_container_`` dumps.
     """
     return all(marker in line for marker in _GRID_DESC_MARKERS)
+
+
+def use_miopen_fast_find_mode() -> None:
+    """Prefer MIOpen FindDb over live solver timing on gfx1151.
+
+    Purpose:
+        Skip ``EvaluateInvokers`` autotune, which reports elapsed <= 0
+        for GEMM and naive convolutions on this Linux gfx1151 driver
+        and then raises ``miopenStatusUnknownError``.
+
+    Strategy:
+        Set ``MIOPEN_FIND_MODE`` to FAST (``2``) so Find uses the user
+        FindDb or an immediate fallback instead of timing every solver.
+
+    Returns:
+        None. Updates ``os.environ`` in place.
+    """
+    os.environ.update(_FAST_FIND_MODE_VALUES)
+
+
+def disable_miopen_winograd_fury_solvers() -> None:
+    """Skip MIOpen Winograd Fury solvers that fail gfx1151 autotune.
+
+    Purpose:
+        Keep convolution find from selecting ``conv_wino_fury_RxS`` on
+        gfx1151 Linux, where a driver elapsed-time crash yields
+        ``miopenStatusUnknownError``.
+
+    Strategy:
+        Set both ``MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS`` flags to ``0``
+        so Find and EvaluateInvokers skip those solvers.
+
+    Returns:
+        None. Updates ``os.environ`` in place.
+    """
+    os.environ.update(_WINOGRAD_FURY_DISABLE_VALUES)
 
 
 def silence_rocm_kernel_logs(*, filter_host_streams: bool = True) -> None:

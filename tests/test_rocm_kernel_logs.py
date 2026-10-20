@@ -10,8 +10,10 @@ import pytest
 
 from utils.rocm_kernel_logs import (
     _copy_filtered_lines,
+    disable_miopen_winograd_fury_solvers,
     is_ck_grid_desc_line,
     silence_rocm_kernel_logs,
+    use_miopen_fast_find_mode,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -83,14 +85,38 @@ def test_silence_without_stream_filter_leaves_sys_stdout(
     assert sys.stdout is original_stdout
 
 
+def test_disable_miopen_winograd_fury_solvers_sets_debug_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Winograd Fury solvers must be turned off before convolution find."""
+    monkeypatch.delenv("MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3", raising=False)
+    monkeypatch.delenv("MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2", raising=False)
+    disable_miopen_winograd_fury_solvers()
+    assert os.environ["MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3"] == "0"
+    assert os.environ["MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2"] == "0"
+
+
+def test_use_miopen_fast_find_mode_sets_find_mode_two(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """FAST find must be selected so gfx1151 skips live solver timing."""
+    monkeypatch.delenv("MIOPEN_FIND_MODE", raising=False)
+    use_miopen_fast_find_mode()
+    assert os.environ["MIOPEN_FIND_MODE"] == "2"
+
+
 def test_prepare_runtime_quiets_rocm_kernel_logs_before_gpu_setup() -> None:
     """prepare_runtime must silence CK dumps before probing the GPU."""
     source = (REPO_ROOT / "config.py").read_text(encoding="utf-8")
     start = source.index("def prepare_runtime")
     body = source[start : source.index("def ensure_download_path")]
     quiet_call = body.index("silence_rocm_kernel_logs()")
+    wino_call = body.index("disable_miopen_winograd_fury_solvers()")
+    find_call = body.index("use_miopen_fast_find_mode()")
     gpu_call = body.index("resolve_gpu_runtime()")
-    assert quiet_call < gpu_call
+    math_call = body.index("enable_medium_float32_matmul_precision()")
+    bench_call = body.index("disable_cudnn_benchmark()")
+    assert quiet_call < wino_call < find_call < gpu_call < math_call < bench_call
 
 
 def test_makefile_train_unsets_ck_logging() -> None:
@@ -99,3 +125,6 @@ def test_makefile_train_unsets_ck_logging() -> None:
     recipe = source[source.index("train:") :]
     assert "env -u CK_LOGGING" in recipe
     assert "MIOPEN_LOG_LEVEL=1" in recipe
+    assert "MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F2X3=0" in recipe
+    assert "MIOPEN_DEBUG_AMD_WINOGRAD_FURY_RXS_F3X2=0" in recipe
+    assert "MIOPEN_FIND_MODE=2" in recipe

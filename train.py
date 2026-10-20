@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ from utils.trainer import Model
 
 if TYPE_CHECKING:
     from typing import Any
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_split_datasets() -> tuple[Dataset, Dataset, Dataset]:
@@ -160,7 +163,7 @@ def run_training() -> tuple[
 
     Purpose:
         Execute the training workflow from CFG-backed datasets through
-        ``trainer.fit``, then report elapsed minutes.
+        ``trainer.fit``, then log elapsed minutes.
 
     Strategy:
         Build each training dependency as a peer stage, fit the model, and
@@ -203,34 +206,41 @@ def run_training() -> tuple[
         train_dataloaders=train_dataloader,
         val_dataloaders=val_dataloader,
     )
-    # trainer.test(
-    #     model=model,
-    #     dataloaders=test_dataloader,
-    #     ckpt_path='best',
-    #     )
 
     # 7. Report elapsed minutes
     end_time = time.perf_counter()
     elapsed_time = end_time - start_time
-    print(f"Training completed in {elapsed_time / 60:.2f} minutes.")
+    LOGGER.info("Training completed in %.2f minutes.", elapsed_time / 60)
     return train_dataloader, val_dataloader, test_dataloader
 
 
 def main() -> None:
-    """Invoke training and keep error reporting and dataloader cleanup here.
+    """Invoke training and keep dataloader cleanup here.
+
+    Purpose:
+        Run the configured training workflow and keep dataloader release
+        in this CLI entry.
+
+    Strategy:
+        Call ``run_training`` and drop the dataloader references in
+        ``finally`` so a training exception still releases loaders.
 
     Returns:
-        None. Prints elapsed time from ``run_training`` or an error message.
+        None. Elapsed time is logged from ``run_training``. Training
+        exceptions propagate after cleanup.
+
+    Flow:
+        1. Run training
+        2. Release dataloaders
     """
     train_dataloader = None
     val_dataloader = None
     test_dataloader = None
     try:
+        # 1. Run training
         train_dataloader, val_dataloader, test_dataloader = run_training()
-    except Exception as e:
-        print(f"An error occurred during training: {e}")
-
     finally:
+        # 2. Release dataloaders
         train_dataloader = None
         val_dataloader = None
         test_dataloader = None

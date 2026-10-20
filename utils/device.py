@@ -14,6 +14,24 @@ def enable_medium_float32_matmul_precision() -> None:
     torch.set_float32_matmul_precision("medium")
 
 
+def disable_cudnn_benchmark() -> None:
+    """Skip cuDNN/MIOpen convolution autotune for gfx1151.
+
+    Purpose:
+        Keep PyTorch from timing convolution solvers. On this Linux
+        gfx1151 driver that search reports elapsed <= 0 and then raises
+        ``miopenStatusUnknownError``.
+
+    Strategy:
+        Set ``torch.backends.cudnn.benchmark`` to False so Find keeps
+        using FAST FindDb instead of EvaluateInvokers.
+
+    Returns:
+        None. Clears the process-wide cuDNN benchmark flag.
+    """
+    torch.backends.cudnn.benchmark = False
+
+
 def resolve_gpu_runtime() -> tuple[str, torch.device]:
     """Return Lightning accelerator settings for a visible CUDA/ROCm GPU.
 

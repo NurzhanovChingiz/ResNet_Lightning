@@ -1,6 +1,7 @@
-from utils.kaggle_download import KaggleDatasetDownloader
-from config import CFG
+"""Download the configured Kaggle dataset into CFG.DOWNLOAD_PATH."""
 
+from config import CFG
+from utils.kaggle_download import KaggleDatasetDownloader
 
 if __name__ == "__main__":
     downloader = KaggleDatasetDownloader(

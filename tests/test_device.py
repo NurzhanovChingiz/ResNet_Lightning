@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from utils.device import (
+    disable_cudnn_benchmark,
     enable_medium_float32_matmul_precision,
     resolve_gpu_runtime,
 )
@@ -57,8 +58,35 @@ def test_config_enables_medium_float32_matmul_precision() -> None:
     assert "enable_medium_float32_matmul_precision" in source
 
 
+def test_disable_cudnn_benchmark_sets_false() -> None:
+    """Convolution autotune must stay off so gfx1151 MIOpen can find an algorithm."""
+    previous = torch.backends.cudnn.benchmark
+    try:
+        torch.backends.cudnn.benchmark = True
+        disable_cudnn_benchmark()
+        assert torch.backends.cudnn.benchmark is False
+    finally:
+        torch.backends.cudnn.benchmark = previous
+
+
+def test_config_disables_cudnn_benchmark() -> None:
+    """config.py must disable convolution autotune instead of enabling it."""
+    source = (REPO_ROOT / "config.py").read_text(encoding="utf-8")
+    assert "disable_cudnn_benchmark" in source
+    assert "cudnn.benchmark = True" not in source
+
+
 def test_train_script_uses_csv_logger_only() -> None:
     """train.py must log with CSVLogger and not construct TensorBoardLogger."""
     source = (REPO_ROOT / "train.py").read_text(encoding="utf-8")
     assert "TensorBoardLogger" not in source
     assert "CSVLogger" in source
+
+
+def test_train_script_releases_dataloaders_after_training_error() -> None:
+    """train.py must clean up in finally and let training exceptions propagate."""
+    source = (REPO_ROOT / "train.py").read_text(encoding="utf-8")
+    assert "except Exception" not in source
+    assert "traceback.print_exc()" not in source
+    assert "try:" in source
+    assert "finally:" in source
