@@ -1,9 +1,79 @@
-# Python cache
+# Python
 __pycache__/
-*.pyc
-# Data
-/data/
-/imagenet1k/
-/lightning_logs/
-# saved outputs
-/output/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.Python
+
+# Build
+build/
+dist/
+wheels/
+
+# Virtual environments
+.venv/
+venv/
+
+# uv
+.uv/
+.uv-cache/
+
+# Linters, type checkers, tests
+.mypy_cache/
+.ruff_cache/
+.pre-commit-cache/
+.pytest_cache/
+.hypothesis/
+.hypothesis_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+mutants/
+.mutmut-cache/
+.cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Dataset download (Kaggle ImageNet)
+data/**
+!data/.gitkeep
+
+# Training artifacts
+lightning_logs/
+*artifacts/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+**/.env
+!**/.env.example
+docker/training/.env
+docker/api/.env
+kaggle.json
+.kaggle/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cursor (local skills/rules; Makefile zip target)
+.cursor/
+cursor.zip
+
+# Experience store
+.vel/
+
+# tmp
+tmp/

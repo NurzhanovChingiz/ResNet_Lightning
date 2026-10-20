@@ -1,0 +1,39 @@
+# Python env / caches
+__pycache__/
+.venv
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.pre-commit-cache
+.hypothesis
+.hypothesis_cache
+.uv
+.uv-cache
+.mutmut-cache
+mutants/
+htmlcov/
+.coverage
+dist/
+.cache/
+
+# Secrets
+.env
+**/.env
+kaggle.json
+.kaggle/
+
+# Dataset download (Kaggle ImageNet)
+data/raw/
+
+# Lightning run artifacts
+lightning_logs/
+
+# Weights / checkpoints
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Jupyter
+.ipynb_checkpoints/

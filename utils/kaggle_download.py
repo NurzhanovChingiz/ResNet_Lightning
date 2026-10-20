@@ -1,65 +1,95 @@
-import kagglehub
+"""Download a Kaggle dataset and copy it into a local folder."""
+
+from __future__ import annotations
+
+import logging
 import shutil
 from pathlib import Path
 
+import kagglehub
+
+LOGGER = logging.getLogger(__name__)
+
+
 class KaggleDatasetDownloader:
-    def __init__(self, dataset_id: str, path_to_save: str, dirs_exist_ok: bool = False) -> None:
-        '''
-        Initializes the KaggleDatasetDownloader with the specified dataset ID.
+    """Download one Kaggle dataset and copy its files to a destination folder."""
+
+    def __init__(
+        self, dataset_id: str, path_to_save: str, *, dirs_exist_ok: bool = False
+    ) -> None:
+        """Store the Kaggle dataset id and the local destination path.
+
         Args:
-            dataset_id (str): The Kaggle dataset identifier (e.g., Link to Kaggle).
-        '''
+            dataset_id: The Kaggle dataset identifier.
+            path_to_save: Local directory that should receive the files.
+            dirs_exist_ok: If True, copy into directories that already exist.
+        """
+        if not dataset_id:
+            message = "Dataset ID must be provided."
+            raise ValueError(message)
+        if not isinstance(dataset_id, str):
+            message = "Dataset ID must be a string."
+            raise TypeError(message)
+        if not path_to_save:
+            message = "Path to save must be provided."
+            raise ValueError(message)
+        if not isinstance(path_to_save, str):
+            message = "Path to save must be a string."
+            raise TypeError(message)
         self.dataset_id = dataset_id
-        assert self.dataset_id, "Dataset ID must be provided."
-        assert isinstance(self.dataset_id, str), "Dataset ID must be a string."
         self.path_to_save = path_to_save
-        assert self.path_to_save, "Path to save must be provided."
-        assert isinstance(self.path_to_save, str), "Path to save must be a string."
         self.dirs_exist_ok = dirs_exist_ok
-    
-    def download_dataset(self, data_folder: str) -> Path:
-        '''
-        Downloads the dataset from Kaggle and returns the source root path.
-        Args:
-            data_folder (str): The path to the folder.
-        '''
-        src_root = Path(kagglehub.dataset_download(self.dataset_id))
-        return src_root
 
-    def _move_items(self, src_root: Path, data_folder_path: Path, dirs_exist_ok: bool = False) -> None:
-        """
-        Copies all items from src_root to data_folder_path.
+    def download_dataset(self, _data_folder: str) -> Path:
+        """Download the dataset through kagglehub and return its cache path.
 
         Args:
-            src_root (Path): Source root path.
-            data_folder_path (Path): Destination folder path.
-            dirs_exist_ok (bool): If True, allows existing directories to be overwritten.
-        """
+            _data_folder: Destination folder accepted for caller compatibility.
 
-        # Ensure destination directory exists
+        Returns:
+            Path to the kagglehub download root.
+        """
+        return Path(kagglehub.dataset_download(self.dataset_id))
+
+    def _move_items(
+        self,
+        src_root: Path,
+        data_folder_path: Path,
+        *,
+        dirs_exist_ok: bool = False,
+    ) -> None:
+        """Copy every item from ``src_root`` into ``data_folder_path``.
+
+        Args:
+            src_root: Source root path.
+            data_folder_path: Destination folder path.
+            dirs_exist_ok: If True, allow existing destination directories.
+        """
         data_folder_path.mkdir(parents=True, exist_ok=True)
 
-        # Iterate through all items in the source directory
         for item in src_root.iterdir():
-            dst = data_folder_path / item.name
+            destination = data_folder_path / item.name
 
             if item.is_dir():
-                # Copy entire directory tree
-                shutil.copytree(item, dst, dirs_exist_ok=True)
+                shutil.copytree(item, destination, dirs_exist_ok=dirs_exist_ok)
             else:
-                # Copy individual file (will overwrite if exists)
-                shutil.copy2(item, dst)
+                shutil.copy2(item, destination)
 
-    
     def run(self) -> None:
-        '''
-        Executes the dataset download and organization process.
-        '''
-        print(f"Downloading {self.dataset_id} dataset to:", self.path_to_save)
+        """Download the dataset and copy it into ``path_to_save``.
+
+        Strategy:
+            Obtain the kagglehub cache root for this dataset, then copy every
+            item into ``path_to_save``.
+
+        Flow:
+            1. Download cache root via download_dataset
+            2. Copy into path_to_save via _move_items
+        """
+        LOGGER.info("Downloading %s dataset to: %s", self.dataset_id, self.path_to_save)
+        # 1. Download cache root via download_dataset
         src_root = self.download_dataset(self.path_to_save)
+        # 2. Copy into path_to_save via _move_items
         data_folder_path = Path(self.path_to_save)
         self._move_items(src_root, data_folder_path, dirs_exist_ok=self.dirs_exist_ok)
-        print(f"{self.dataset_id} dataset downloaded and organized.")
-
-
- 
+        LOGGER.info("%s dataset downloaded and organized.", self.dataset_id)

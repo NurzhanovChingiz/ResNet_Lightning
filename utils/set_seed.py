@@ -1,15 +1,28 @@
-import torch
-import numpy as np
+"""Seed Python, NumPy, PyTorch, and Lightning random number generators."""
+
+from __future__ import annotations
+
+import logging
 import random
+
+import numpy as np
+import torch
 from lightning.pytorch import seed_everything
 
-def set_seed(SEED: int = 42):
-    seed_everything(SEED)
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    np.random.seed(SEED)
-    random.seed(SEED)
+LOGGER = logging.getLogger(__name__)
 
-    print('Random Seed : {0}'.format(SEED))
-    
+
+def set_seed(seed: int = 42) -> None:
+    """Seed every RNG used by training.
+
+    Args:
+        seed: Value applied to Python, NumPy, PyTorch, and Lightning.
+    """
+    seed_everything(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    LOGGER.info("Random Seed : %s", seed)

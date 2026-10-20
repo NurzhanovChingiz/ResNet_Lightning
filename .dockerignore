@@ -1,0 +1,65 @@
+# VCS / editor
+.git
+**/.git*
+.github
+.cursor
+.agents
+.vscode
+.idea
+
+# Python env / caches
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.mypy_cache
+.ruff_cache
+.pytest_cache
+.hypothesis
+.hypothesis_cache
+htmlcov
+.coverage
+.coverage.*
+mutants
+.mutmut-cache
+.uv
+.uv-cache
+.cache
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+kaggle.json
+.kaggle
+
+# Large / generated
+data
+lightning_logs
+artifacts
+tmp
+cursor.zip
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+.ipynb_checkpoints
+*.log
+
+# Dev-only
+tests
+**/conftest.py
+docs
+notebooks
+.vel
