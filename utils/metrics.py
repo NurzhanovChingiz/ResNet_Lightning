@@ -20,6 +20,9 @@ from torchmetrics import (
 LOGGER = logging.getLogger(__name__)
 
 MetricTask = Literal["binary", "multiclass", "multilabel"]
+_BatchStatSlots = tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]
 
 _CLASSIFICATION_METRIC_NAMES = (
     "accuracy_top1",
@@ -32,6 +35,63 @@ _COMPUTE_GROUPS = (
     ("accuracy_top1", "f1_score", "precision", "recall"),
     ("accuracy_top5",),
 )
+
+
+def _reduce_leader_pred_indices(
+    preds: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    top_k: int | None,
+    shared_topk: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reduce one leader's predicted and target class indices.
+
+    Purpose:
+        Produce flattened predicted and target indices for one compute-group
+        leader without repeating a logits top-k when the caller already
+        reduced the batch.
+
+    Strategy:
+        Flatten labels, reuse a shared top-k tensor when present, otherwise
+        run top-k or argmax on logits, and keep already-reduced predictions.
+
+    Args:
+        preds: Model logits or already-reduced class indices.
+        targets: Integer class labels.
+        top_k: Leader top-k width, or 1.
+        shared_topk: Optional top-k class indices already reduced from
+            ``preds``.
+
+    Returns:
+        Flattened predicted class indices and flattened target indices.
+
+    Flow:
+        1. Flatten labels
+        2. Keep already-reduced predictions
+        3. Reuse shared top-k or reduce logits
+    """
+    # 1. Flatten labels
+    target_idx = targets.reshape(-1)
+    # 2. Keep already-reduced predictions
+    if preds.ndim != targets.ndim + 1:
+        return preds.reshape(-1), target_idx
+    # 3. Reuse shared top-k or reduce logits
+    if shared_topk is not None:
+        top1_idx = shared_topk[:, 0]
+        if top_k is not None and top_k > 1:
+            in_topk = (
+                shared_topk[:, : int(top_k)].eq(target_idx.unsqueeze(1)).any(dim=1)
+            )
+            pred_idx = torch.where(in_topk, target_idx, top1_idx)
+        else:
+            pred_idx = top1_idx
+    elif top_k is not None and top_k > 1:
+        topk_idx = preds.topk(k=int(top_k), dim=1).indices
+        in_topk = topk_idx.eq(target_idx.unsqueeze(1)).any(dim=1)
+        pred_idx = torch.where(in_topk, target_idx, topk_idx[:, 0])
+    else:
+        pred_idx = preds.argmax(dim=1)
+    return pred_idx.reshape(-1), target_idx
 
 
 class NoNanMeanMetric(MeanMetric):
@@ -147,9 +207,10 @@ class MetricsTracker(nn.Module):
             recall, and F1 in ``MetricCollection`` with pinned compute
             groups and disabled per-batch argument checks, move both
             modules onto a non-CPU constructor device, store each group's
-            leader for later batch updates, then pin 0-dim loss value,
-            unit-weight slots, and the top-1 confusion bin buffer on that
-            device.
+            leader and the widest top-k for a shared logits reduction,
+            then pin 0-dim loss value, unit-weight slots, per-class
+            scatter bins, a shared target-support histogram, match
+            slots, and a top-k membership buffer on that device.
 
         Args:
             task: Torchmetrics task name, such as ``multiclass``.
@@ -157,18 +218,19 @@ class MetricsTracker(nn.Module):
             device: Device that owns the mean-loss and classification modules.
 
         Flow:
-            1. Store device and class count
+            1. Store device
             2. Construct mean-loss metric
             3. Construct classification collection
             4. Move metrics onto device
             5. Pin compute-group leaders
-            6. Pin loss slots
-            7. Pin top-1 confusion bins
+            6. Store widest top-k
+            7. Pin loss slots
+            8. Pin scatter scratch
+            9. Pin top-k membership buffer
         """
         super().__init__()
-        # 1. Store device and class count
+        # 1. Store device
         self._device = device
-        self._num_classes = num_classes
         # 2. Construct mean-loss metric
         self.avg_loss = NoNanMeanMetric()
         # 3. Construct classification collection
@@ -222,88 +284,347 @@ class MetricsTracker(nn.Module):
             tuple(getattr(self._classification, name) for name in group)
             for group in _COMPUTE_GROUPS
         )
-        # 6. Pin loss slots
+        # 6. Store widest top-k
+        self._max_top_k = max(
+            int(getattr(group[0], "top_k", 1) or 1)
+            for group in self._classification_groups
+        )
+        # 7. Pin loss slots
         self._loss_value = torch.empty(
             (), dtype=self.avg_loss.dtype, device=self._device
         )
         self._loss_weight = torch.ones(
             (), dtype=self.avg_loss.dtype, device=self._device
         )
-        # 7. Pin top-1 confusion bins
-        self._top1_bin_counts = torch.zeros(
-            (num_classes * num_classes,),
-            dtype=torch.int64,
-            device=self._device,
+        # 8. Pin scatter scratch
+        self._stat_tp = torch.zeros(
+            (num_classes,), dtype=torch.int64, device=self._device
+        )
+        self._stat_fp = torch.zeros(
+            (num_classes,), dtype=torch.int64, device=self._device
+        )
+        self._stat_fn = torch.zeros(
+            (num_classes,), dtype=torch.int64, device=self._device
+        )
+        self._stat_support = torch.zeros(
+            (num_classes,), dtype=torch.int64, device=self._device
+        )
+        self._stat_ones = torch.ones((0,), dtype=torch.int64, device=self._device)
+        self._stat_eq = torch.empty((0,), dtype=torch.bool, device=self._device)
+        self._stat_match = torch.empty((0,), dtype=torch.int64, device=self._device)
+        # 9. Pin top-k membership buffer
+        self._topk_eq = torch.empty(
+            (0, self._max_top_k), dtype=torch.bool, device=self._device
         )
 
-    def _accumulate_top1_stat_scores(
-        self,
-        leader: Metric,
-        preds: torch.Tensor,
-        targets: torch.Tensor,
-    ) -> None:
-        """Fold one top-1 batch into confusion counts without ``bincount``.
+    def _stat_slots(
+        self, sample_count: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return pinned ones, equality, and match slices for one batch.
 
         Purpose:
-            Build the same per-class tp/fp/tn/fn as torchmetrics' top-1
-            global confusion path, using a pinned scatter-add buffer.
+            Grow the pinned per-sample scratch tensors when the batch is
+            wider than the current slots, then return views for this batch.
 
         Strategy:
-            Disable gradients, reduce logits to class indices, scatter
-            one count per sample into the pinned ``C * C`` buffer, derive
-            the four stat tensors, then apply the leader's existing state
-            write and increment its update count.
+            Allocate ones, bool equality, and int64 match buffers when the
+            stored length is too small, then slice each buffer to
+            ``sample_count``.
+
+        Args:
+            sample_count: Number of flattened labels in the batch.
+
+        Returns:
+            Ones, equality, and match tensors of length ``sample_count``.
+
+        Flow:
+            1. Grow scratch when needed
+            2. Slice this batch
+        """
+        # 1. Grow scratch when needed
+        if self._stat_ones.numel() < sample_count:
+            self._stat_ones = torch.ones(
+                sample_count, dtype=torch.int64, device=self._device
+            )
+            self._stat_eq = torch.empty(
+                sample_count, dtype=torch.bool, device=self._device
+            )
+            self._stat_match = torch.empty(
+                sample_count, dtype=torch.int64, device=self._device
+            )
+        # 2. Slice this batch
+        return (
+            self._stat_ones[:sample_count],
+            self._stat_eq[:sample_count],
+            self._stat_match[:sample_count],
+        )
+
+    def _topk_eq_view(self, sample_count: int, top_k: int) -> torch.Tensor:
+        """Return a pinned [N, K] bool view for one top-k membership compare.
+
+        Purpose:
+            Grow the pinned top-k equality buffer when the batch is wider
+            than the current rows, then return the view this compare writes.
+
+        Strategy:
+            Allocate a bool buffer of width ``_max_top_k`` when the stored
+            row count is too small, then slice to ``sample_count`` by
+            ``top_k``.
+
+        Args:
+            sample_count: Number of flattened labels in the batch.
+            top_k: Leader top-k width to compare.
+
+        Returns:
+            Bool tensor of shape ``(sample_count, top_k)``.
+
+        Flow:
+            1. Grow scratch when needed
+            2. Slice this compare
+        """
+        # 1. Grow scratch when needed
+        if self._topk_eq.shape[0] < sample_count:
+            self._topk_eq = torch.empty(
+                (sample_count, self._max_top_k),
+                dtype=torch.bool,
+                device=self._device,
+            )
+        # 2. Slice this compare
+        return self._topk_eq[:sample_count, :top_k]
+
+    def _prepare_batch_stats(
+        self,
+        preds: torch.Tensor,
+        targets: torch.Tensor,
+        shared_topk: torch.Tensor | None,
+    ) -> _BatchStatSlots:
+        """Flatten indices once and scatter the target-class histogram.
+
+        Purpose:
+            Share one long pred/target pair and one target-class support
+            histogram across compute groups so later leader updates do not
+            flatten labels or scatter ``ones`` onto targets again.
+
+        Strategy:
+            Reduce top-1 indices from the shared top-k tensor or logits,
+            keep already-long dtypes, slice pinned match slots, then scatter
+            the target histogram into the pinned support buffer.
+
+        Args:
+            preds: Model logits or already-reduced class indices.
+            targets: Integer class labels.
+            shared_topk: Optional top-k class indices already reduced from
+                ``preds``.
+
+        Returns:
+            Predicted indices, target indices, ones, equality buffer, and
+            match buffer for this batch. Also fills ``_stat_support``.
+
+        Flow:
+            1. Reduce indices
+            2. Keep already-long dtypes
+            3. Slice match slots
+            4. Scatter target support
+        """
+        # 1. Reduce indices
+        pred_idx, target_idx = _reduce_leader_pred_indices(
+            preds,
+            targets,
+            top_k=1,
+            shared_topk=shared_topk,
+        )
+        # 2. Keep already-long dtypes
+        if pred_idx.dtype != torch.long:
+            pred_idx = pred_idx.to(dtype=torch.long)
+        if target_idx.dtype != torch.long:
+            target_idx = target_idx.to(dtype=torch.long)
+        # 3. Slice match slots
+        ones, eq_buf, match = self._stat_slots(target_idx.numel())
+        # 4. Scatter target support
+        self._stat_support.zero_()
+        self._stat_support.scatter_add_(0, target_idx, ones)
+        return pred_idx, target_idx, ones, eq_buf, match
+
+    def _add_leader_counts(
+        self, leader: Metric, filled: tuple[tuple[str, torch.Tensor], ...]
+    ) -> None:
+        """Add pinned per-class counts into one leader and bump its update count.
+
+        Purpose:
+            Fold already-scattered tp/fp/fn buffers into the leader's live
+            stat tensors.
+
+        Strategy:
+            Add each named buffer into the matching leader tensor, then
+            increment ``_update_count``.
 
         Args:
             leader: Compute-group leader whose state stores confusion counts.
-            preds: Model logits or already-reduced class indices.
-            targets: Integer class labels.
+            filled: Name and pinned count tensor pairs to add.
 
         Returns:
             None. Updates ``leader`` confusion state and ``_update_count``.
 
         Flow:
-            1. Reduce indices
-            2. Scatter into pinned bins
-            3. Derive tp/fp/tn/fn
-            4. Write leader state
+            1. Add named count tensors
+            2. Increment update count
         """
-        # 1. Reduce indices
-        with torch.set_grad_enabled(False):
-            pred_idx = preds.argmax(dim=1) if preds.ndim == targets.ndim + 1 else preds
-            pred_idx = pred_idx.reshape(-1)
-            target_idx = targets.reshape(-1)
-            unique_mapping = target_idx.to(
-                dtype=torch.long
-            ) * self._num_classes + pred_idx.to(dtype=torch.long)
-            # 2. Scatter into pinned bins
-            self._top1_bin_counts.zero_()
-            self._top1_bin_counts.scatter_add_(
-                0, unique_mapping, torch.ones_like(unique_mapping)
-            )
-            confmat = self._top1_bin_counts.view(self._num_classes, self._num_classes)
-            # 3. Derive tp/fp/tn/fn
-            tp = confmat.diag().clone()
-            fp = confmat.sum(0) - tp
-            fn = confmat.sum(1) - tp
-            tn = confmat.sum() - (fp + fn + tp)
-        # 4. Write leader state
-        updater = object.__getattribute__(leader, "_update_state")
-        updater(tp, fp, tn, fn)
+        # 1. Add named count tensors
+        for name, counts in filled:
+            state = getattr(leader, name)
+            if not isinstance(state, torch.Tensor):
+                message = "leader confusion state must be a tensor"
+                raise TypeError(message)
+            state.add_(counts)
+        # 2. Increment update count
         object.__setattr__(leader, "_update_count", leader.update_count + 1)
+
+    def _accumulate_topk_hits(
+        self,
+        leader: Metric,
+        batch_stats: _BatchStatSlots,
+        shared_topk: torch.Tensor | None,
+        top_k: int,
+    ) -> None:
+        """Fold top-k hits into tp and fn without reconstructing predictions.
+
+        Purpose:
+            Update a weighted top-k accuracy leader from label membership in
+            the shared top-k index tensor, without a pred vector, a second
+            target histogram, or unused false-positive scatter.
+
+        Strategy:
+            Prefer membership of the flattened labels in ``shared_topk``,
+            written into a pinned [N, K] equality buffer and a pinned
+            [N] any-slot. Fall back to exact index equality when that
+            tensor is missing. Scatter hits into tp, copy the shared
+            target-support histogram into fn, then add those buffers
+            into the leader.
+
+        Args:
+            leader: Top-k accuracy leader whose state stores confusion counts.
+            batch_stats: Shared pred indices, target indices, ones, equality
+                buffer, and match buffer for this batch.
+            shared_topk: Optional top-k class indices already reduced from
+                logits.
+            top_k: Leader top-k width.
+
+        Returns:
+            None. Updates ``leader`` tp, fn, and ``_update_count``.
+
+        Flow:
+            1. Reduce top-k membership
+            2. Scatter tp and copy support into fn
+            3. Add tp and fn into leader state
+        """
+        # 1. Reduce top-k membership
+        pred_idx, target_idx, _ones, eq_buf, match = batch_stats
+        if shared_topk is not None:
+            eq_view = self._topk_eq_view(target_idx.numel(), top_k)
+            torch.eq(shared_topk[:, :top_k], target_idx.unsqueeze(1), out=eq_view)
+            torch.any(eq_view, dim=1, out=eq_buf)
+            match.copy_(eq_buf)
+        else:
+            torch.eq(pred_idx, target_idx, out=eq_buf)
+            match.copy_(eq_buf)
+        # 2. Scatter tp and copy support into fn
+        self._stat_tp.zero_()
+        self._stat_tp.scatter_add_(0, target_idx, match)
+        self._stat_fn.copy_(self._stat_support)
+        self._stat_fn.sub_(self._stat_tp)
+        # 3. Add tp and fn into leader state
+        self._add_leader_counts(leader, (("tp", self._stat_tp), ("fn", self._stat_fn)))
+
+    def _accumulate_stat_scores(
+        self,
+        leader: Metric,
+        batch_stats: _BatchStatSlots,
+        shared_topk: torch.Tensor | None,
+    ) -> None:
+        """Fold one batch into confusion counts without ``bincount`` or one-hot.
+
+        Purpose:
+            Build the same per-class tp/fp/fn as torchmetrics' multiclass
+            accuracy, precision, recall, and F1 path, using pinned per-class
+            scatter-add buffers, a shared target-support histogram, and
+            pinned match slots.
+
+        Strategy:
+            Send a top-k accuracy leader through membership hits. For top-1,
+            write equality into pinned match slots, scatter matches and the
+            predicted-class histogram into pinned length-``C`` buffers, copy
+            the shared target-support histogram into fn, then add tp/fp/fn
+            into the leader's existing stat tensors. Multiclass compute does
+            not fill true negatives.
+
+        Args:
+            leader: Compute-group leader whose state stores confusion counts.
+            batch_stats: Shared pred indices, target indices, ones, equality
+                buffer, and match buffer for this batch.
+            shared_topk: Optional top-k class indices already reduced from
+                logits, shared across compute groups.
+
+        Returns:
+            None. Updates ``leader`` confusion state and ``_update_count``.
+
+        Flow:
+            1. Dispatch top-k hits
+            2. Write top-1 match
+            3. Scatter per-class counts from shared support
+            4. Add tp/fp/fn into leader state
+        """
+        # 1. Dispatch top-k hits
+        pred_idx, target_idx, ones, eq_buf, match = batch_stats
+        top_k = getattr(leader, "top_k", 1)
+        if top_k is not None and int(top_k) > 1:
+            self._accumulate_topk_hits(
+                leader,
+                batch_stats,
+                shared_topk,
+                int(top_k),
+            )
+            return
+        # 2. Write top-1 match
+        torch.eq(pred_idx, target_idx, out=eq_buf)
+        match.copy_(eq_buf)
+        # 3. Scatter per-class counts from shared support
+        self._stat_tp.zero_()
+        self._stat_fp.zero_()
+        self._stat_tp.scatter_add_(0, target_idx, match)
+        self._stat_fp.scatter_add_(0, pred_idx, ones)
+        self._stat_fp.sub_(self._stat_tp)
+        self._stat_fn.copy_(self._stat_support)
+        self._stat_fn.sub_(self._stat_tp)
+        # 4. Add tp/fp/fn into leader state
+        self._add_leader_counts(
+            leader,
+            (
+                ("tp", self._stat_tp),
+                ("fp", self._stat_fp),
+                ("fn", self._stat_fn),
+            ),
+        )
 
     def update_metrics(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
         """Accumulate classification metrics from a batch.
 
         Purpose:
             Fold one batch into grouped classification state without repeating
-            MetricCollection's sibling-state rebind or top-1 ``bincount``.
+            MetricCollection's sibling-state rebind, a ``C * C`` confusion
+            buffer, top-1 ``bincount``, a second logits ``argmax``, a second
+            target-class histogram scatter, a second index flatten, top-k
+            one-hot stat scores, a reconstructed top-k prediction vector,
+            unused top-k false-positive scatter, a fresh top-k equality
+            tensor, or warmed dtype recasts of index and match tensors.
 
         Strategy:
-            Clear cached computes on every classification metric, accumulate
-            top-1 confusion with the pinned scatter-add path, update other
-            group leaders through torchmetrics, then copy the leader update
-            count onto siblings that already share tensor state.
+            Clear cached computes on every classification metric, reduce
+            logits to one shared top-k index tensor when the batch still
+            has a class dimension, flatten indices and scatter target
+            support once, accumulate each group's confusion from that
+            shared state with pinned per-class scatter-add, then copy
+            the leader update count onto siblings that already share
+            tensor state.
 
         Args:
             preds: Model logits or probabilities.
@@ -311,21 +632,27 @@ class MetricsTracker(nn.Module):
 
         Flow:
             1. Invalidate cached computes
-            2. Update leaders and sibling counts
+            2. Reduce logits once
+            3. Prepare shared indices and target support
+            4. Update leaders and sibling counts
         """
         # 1. Invalidate cached computes
         for metric in self._classification_metrics:
             object.__setattr__(metric, "_computed", None)
-        # 2. Update leaders and sibling counts
-        for group in self._classification_groups:
-            leader = group[0]
-            if getattr(leader, "top_k", None) == 1:
-                self._accumulate_top1_stat_scores(leader, preds, targets)
-            else:
-                leader.update(preds, targets)
-            update_count = leader.update_count
-            for sibling in group[1:]:
-                object.__setattr__(sibling, "_update_count", update_count)
+        # 2. Reduce logits once
+        shared_topk: torch.Tensor | None = None
+        if preds.ndim == targets.ndim + 1 and self._max_top_k > 1:
+            shared_topk = preds.topk(k=self._max_top_k, dim=1).indices
+        # 3. Prepare shared indices and target support
+        with torch.set_grad_enabled(False):
+            batch_stats = self._prepare_batch_stats(preds, targets, shared_topk)
+            # 4. Update leaders and sibling counts
+            for group in self._classification_groups:
+                leader = group[0]
+                self._accumulate_stat_scores(leader, batch_stats, shared_topk)
+                update_count = leader.update_count
+                for sibling in group[1:]:
+                    object.__setattr__(sibling, "_update_count", update_count)
 
     def update_loss(self, loss_value: float | torch.Tensor) -> None:
         """Accumulate a batch loss into the running mean.
