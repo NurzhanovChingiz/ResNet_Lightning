@@ -95,9 +95,48 @@ def test_update_loss_skips_aligned_mean_recast(
     tracker = _cpu_tracker()
     tracker.update_loss(0.5)
     broadcast_to = Mock(wraps=torch.broadcast_to)
+    to_count = {"n": 0}
+    original_to = torch.Tensor.to
+
+    def wrapped_to(self: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
+        to_count["n"] += 1
+        recast = cast("Callable[..., torch.Tensor]", original_to)
+        return recast(self, *args, **kwargs)
+
     monkeypatch.setattr(torch, "broadcast_to", broadcast_to)
+    monkeypatch.setattr(torch.Tensor, "to", wrapped_to)
     tracker.update_loss(0.25)
     assert broadcast_to.call_count == 0
+    assert to_count["n"] == 0
+    assert tracker.get_metric("avg_loss").compute().item() == pytest.approx(0.375)
+
+
+def test_update_loss_skips_unused_grad_wrap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed scalar loss update must skip Metric.set_grad_enabled wrapping."""
+    tracker = _cpu_tracker()
+    tracker.update_loss(0.5)
+    set_grad = Mock(wraps=torch.set_grad_enabled)
+    monkeypatch.setattr(torch, "set_grad_enabled", set_grad)
+    tracker.update_loss(0.25)
+    assert set_grad.call_count == 0
+    assert tracker.get_metric("avg_loss").compute().item() == pytest.approx(0.375)
+
+
+def test_update_loss_uses_pinned_mean_update_after_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second loss update must call update_pinned and skip general update."""
+    tracker = _cpu_tracker()
+    tracker.update_loss(0.5)
+    pinned = Mock(wraps=tracker.avg_loss.update_pinned)
+    general = Mock(wraps=tracker.avg_loss.update)
+    monkeypatch.setattr(tracker.avg_loss, "update_pinned", pinned)
+    monkeypatch.setattr(tracker.avg_loss, "update", general)
+    tracker.update_loss(0.25)
+    assert pinned.call_count == 1
+    assert general.call_count == 0
     assert tracker.get_metric("avg_loss").compute().item() == pytest.approx(0.375)
 
 
@@ -253,13 +292,16 @@ def test_update_metrics_skips_topk_pred_reconstruction_and_fp_scatter(
 ) -> None:
     """A warmed logits batch must not rebuild top-k preds or scatter unused fp.
 
-    Shared target support plus per-leader tp/fp scatters is four in-place adds.
+    Shared target support plus top-k tp stay on scatter_add_; top-1 tp/fp
+    use 1-D index_add_.
     """
     tracker = _cpu_tracker()
     warmup_preds, warmup_targets = _cifar_batch(0)
     tracker.update_metrics(warmup_preds, warmup_targets)
     scatter_count = {"n": 0}
+    index_add_count = {"n": 0}
     original_scatter = torch.Tensor.scatter_add_
+    original_index_add = torch.Tensor.index_add_
     where = Mock(wraps=torch.where)
 
     def wrapped_scatter(
@@ -268,12 +310,20 @@ def test_update_metrics_skips_topk_pred_reconstruction_and_fp_scatter(
         scatter_count["n"] += 1
         return original_scatter(self, dim, index, src)
 
+    def wrapped_index_add(
+        self: torch.Tensor, dim: int, index: torch.Tensor, source: torch.Tensor
+    ) -> torch.Tensor:
+        index_add_count["n"] += 1
+        return original_index_add(self, dim, index, source)
+
     monkeypatch.setattr(torch, "where", where)
     monkeypatch.setattr(torch.Tensor, "scatter_add_", wrapped_scatter)
+    monkeypatch.setattr(torch.Tensor, "index_add_", wrapped_index_add)
     preds, targets = _cifar_batch(1)
     tracker.update_metrics(preds, targets)
     assert where.call_count == 0
-    assert scatter_count["n"] == 4
+    assert scatter_count["n"] == 2
+    assert index_add_count["n"] == 2
     values = tracker.compute()
     accuracy_top1 = Accuracy(
         task="multiclass", num_classes=10, average="weighted", top_k=1
@@ -471,6 +521,60 @@ def test_update_metrics_skips_dtype_recast_after_warmup(
     accuracy_top1.update(warmup_preds, warmup_targets)
     accuracy_top1.update(preds, targets)
     assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+
+
+def test_update_metrics_skips_exact_size_scratch_views(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed CIFAR-10 batch must not rebuild identical scratch views."""
+    tracker = _cpu_tracker()
+    warmup_preds, warmup_targets = _cifar_batch(0)
+    tracker.update_metrics(warmup_preds, warmup_targets)
+    getitem_count = {"n": 0}
+    original_getitem = torch.Tensor.__getitem__
+
+    def wrapped(self: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
+        getitem_count["n"] += 1
+        recast = cast("Callable[..., torch.Tensor]", original_getitem)
+        return recast(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "__getitem__", wrapped)
+    preds, targets = _cifar_batch(1)
+    tracker.update_metrics(preds, targets)
+    assert getitem_count["n"] == 3
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top1.update(warmup_preds, warmup_targets)
+    accuracy_top1.update(preds, targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+
+
+def test_update_metrics_grows_and_slices_variable_batch_sizes() -> None:
+    """Shorter batches still slice scratch; wider batches still grow it."""
+    tracker = _cpu_tracker()
+    first_preds, first_targets = _cifar_batch(0)
+    short_preds, short_targets = first_preds[:32], first_targets[:32]
+    wide_preds, wide_targets = _logits_batch(10, 1, batch_size=200)
+    tracker.update_metrics(first_preds, first_targets)
+    tracker.update_metrics(short_preds, short_targets)
+    tracker.update_metrics(wide_preds, wide_targets)
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top5 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=5
+    )
+    accuracy_top1.update(first_preds, first_targets)
+    accuracy_top1.update(short_preds, short_targets)
+    accuracy_top1.update(wide_preds, wide_targets)
+    accuracy_top5.update(first_preds, first_targets)
+    accuracy_top5.update(short_preds, short_targets)
+    accuracy_top5.update(wide_preds, wide_targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+    assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
 
 
 def test_update_metrics_skips_ones_like_after_warmup(

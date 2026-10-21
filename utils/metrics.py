@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import torch
 from torch import nn
@@ -16,6 +16,9 @@ from torchmetrics import (
     Precision,
     Recall,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LOGGER = logging.getLogger(__name__)
 
@@ -124,6 +127,72 @@ def _reduce_leader_pred_indices(
 class NoNanMeanMetric(MeanMetric):
     """MeanMetric that casts inputs without rejecting NaN values."""
 
+    def _wrap_update(self, update: Callable[..., None]) -> Callable[..., None]:
+        """Return an update wrapper that skips unused grad and error wrapping.
+
+        Purpose:
+            Invalidate cached compute and count the update without a
+            ``set_grad_enabled`` context, a RuntimeError rewrite, or a
+            ``compute_on_cpu`` branch that this metric never takes.
+
+        Strategy:
+            Bind a thin callable that clears ``_computed``, increments
+            ``_update_count``, then calls the raw ``update``.
+
+        Args:
+            update: Unwrapped ``update`` method for this instance.
+
+        Returns:
+            A callable with the same value/weight arguments as ``update``.
+
+        Flow:
+            1. Define thin wrapper
+            2. Return wrapper
+        """
+
+        # 1. Define thin wrapper
+        def wrapped(
+            value: float | torch.Tensor,
+            weight: float | torch.Tensor | None = None,
+        ) -> None:
+            """Invalidate cache, count the update, then accumulate."""
+            object.__setattr__(self, "_computed", None)
+            object.__setattr__(self, "_update_count", self._update_count + 1)
+            update(value, weight)
+
+        # 2. Return wrapper
+        return wrapped
+
+    def update_pinned(self, value: torch.Tensor, weight: torch.Tensor) -> None:
+        """Accumulate one already-pinned 0-dim value/weight pair.
+
+        Purpose:
+            Fold a 0-dim tensor pair that the tracker already wrote into
+            pinned slots, without repeating ``isinstance`` or ``ndim``
+            checks ``update`` still performs for general callers.
+
+        Strategy:
+            Clear the compute cache, count the update, then add the pair
+            in place. Leave ``update``'s general path unchanged.
+
+        Args:
+            value: Pinned 0-dim loss contribution.
+            weight: Pinned 0-dim weight aligned with ``value``.
+
+        Returns:
+            None. Updates ``mean_value`` and ``weight`` state.
+
+        Flow:
+            1. Invalidate cache and count
+            2. In-place accumulate
+        """
+        # 1. Invalidate cache and count
+        object.__setattr__(self, "_computed", None)
+        object.__setattr__(self, "_update_count", self._update_count + 1)
+        # 2. In-place accumulate
+        self.mean_value.addcmul_(value, weight)
+        self.weight.add_(weight)
+
     def update(
         self,
         value: float | torch.Tensor,
@@ -132,13 +201,12 @@ class NoNanMeanMetric(MeanMetric):
         """Accumulate one weighted value into the running mean.
 
         Purpose:
-            Fold an already-aligned 0-dim value and weight into the running
-            mean without recasting, and keep the generic MeanMetric path for
-            other inputs.
+            Fold an already 0-dim tensor pair in place without repeating
+            dtype and device alignment checks the tracker already pinned.
 
         Strategy:
-            When value and weight are 0-dim tensors on this metric's device
-            and dtype, add them in place; otherwise defer to MeanMetric.
+            When value and weight are 0-dim tensors, add them in place;
+            otherwise defer to MeanMetric.
 
         Args:
             value: Scalar or tensor contribution.
@@ -148,20 +216,16 @@ class NoNanMeanMetric(MeanMetric):
             None. Updates ``mean_value`` and ``weight`` state.
 
         Flow:
-            1. Detect aligned 0-dim tensors
+            1. Detect 0-dim tensors
             2. In-place accumulate
             3. Defer other inputs
         """
-        # 1. Detect aligned 0-dim tensors
+        # 1. Detect 0-dim tensors
         if (
             isinstance(value, torch.Tensor)
             and isinstance(weight, torch.Tensor)
             and value.ndim == 0
             and weight.ndim == 0
-            and value.dtype == self.dtype
-            and weight.dtype == self.dtype
-            and value.device == self.device
-            and weight.device == self.device
         ):
             # 2. In-place accumulate
             self.mean_value.addcmul_(value, weight)
@@ -179,12 +243,13 @@ class NoNanMeanMetric(MeanMetric):
 
         Purpose:
             Coerce the input and weight onto this metric's device and dtype
-            without rejecting NaN values.
+            without rejecting NaN values and without a second ``.to`` when
+            the tensor is already aligned.
 
         Strategy:
-            Promote ``x`` to a tensor if needed, move it onto the metric
-            device and dtype, coerce or default the weight the same way, then
-            return the aligned pair.
+            Promote Python scalars with one ``as_tensor`` that already names
+            device and dtype, move only misaligned tensors, then default a
+            missing weight to ones.
 
         Args:
             x: Scalar or tensor loss value.
@@ -194,25 +259,25 @@ class NoNanMeanMetric(MeanMetric):
             Device-local input tensor and weight tensor.
 
         Flow:
-            1. Coerce x
-            2. Move device/dtype
-            3. Coerce or default weight
-            4. Move weight
-            5. Return
+            1. Coerce or move x
+            2. Coerce, default, or move weight
+            3. Return
         """
-        # 1. Coerce x
+        device = self.device
+        dtype = self.dtype
+        # 1. Coerce or move x
         if not isinstance(x, torch.Tensor):
-            x = torch.as_tensor(x)
-        # 2. Move device/dtype
-        x = x.to(device=self.device, dtype=self.dtype)
-        # 3. Coerce or default weight
-        if weight is not None and not isinstance(weight, torch.Tensor):
-            weight = torch.as_tensor(weight)
+            x = torch.as_tensor(x, device=device, dtype=dtype)
+        elif x.dtype != dtype or x.device != device:
+            x = x.to(device=device, dtype=dtype)
+        # 2. Coerce, default, or move weight
         if weight is None:
             weight = torch.ones_like(x)
-        # 4. Move weight
-        weight = weight.to(device=self.device, dtype=self.dtype)
-        # 5. Return
+        elif not isinstance(weight, torch.Tensor):
+            weight = torch.as_tensor(weight, device=device, dtype=dtype)
+        elif weight.dtype != dtype or weight.device != device:
+            weight = weight.to(device=device, dtype=dtype)
+        # 3. Return
         return x, weight
 
 
@@ -341,16 +406,18 @@ class MetricsTracker(nn.Module):
     def _stat_slots(
         self, sample_count: int
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return pinned ones, equality, and match slices for one batch.
+        """Return pinned ones, equality, and match tensors for one batch.
 
         Purpose:
-            Grow the pinned per-sample scratch tensors when the batch is
-            wider than the current slots, then return views for this batch.
+            Reuse the pinned per-sample scratch tensors on the warmed path
+            when their stored length already equals the batch, without
+            building three identical views.
 
         Strategy:
-            Allocate ones, bool equality, and int64 match buffers when the
-            stored length is too small, then slice each buffer to
-            ``sample_count``.
+            Return the stored tensors when ``numel`` matches ``sample_count``.
+            Allocate ones, bool equality, and int64 match buffers only when
+            the stored length is too small. Slice each buffer when the batch
+            is shorter than the stored length.
 
         Args:
             sample_count: Number of flattened labels in the batch.
@@ -359,38 +426,45 @@ class MetricsTracker(nn.Module):
             Ones, equality, and match tensors of length ``sample_count``.
 
         Flow:
-            1. Grow scratch when needed
-            2. Slice this batch
+            1. Return exact-size buffers
+            2. Grow scratch when needed
+            3. Slice a shorter batch
         """
-        # 1. Grow scratch when needed
-        if self._stat_ones.numel() < sample_count:
-            self._stat_ones = torch.ones(
-                sample_count, dtype=torch.int64, device=self._device
-            )
-            self._stat_eq = torch.empty(
-                sample_count, dtype=torch.bool, device=self._device
-            )
-            self._stat_match = torch.empty(
-                sample_count, dtype=torch.int64, device=self._device
-            )
-        # 2. Slice this batch
+        ones = self._stat_ones
+        stored = ones.numel()
+        # 1. Return exact-size buffers
+        if stored == sample_count:
+            return ones, self._stat_eq, self._stat_match
+        # 2. Grow scratch when needed
+        if stored < sample_count:
+            device = self._device
+            ones = torch.ones(sample_count, dtype=torch.int64, device=device)
+            eq_buf = torch.empty(sample_count, dtype=torch.bool, device=device)
+            match = torch.empty(sample_count, dtype=torch.int64, device=device)
+            self._stat_ones = ones
+            self._stat_eq = eq_buf
+            self._stat_match = match
+            return ones, eq_buf, match
+        # 3. Slice a shorter batch
         return (
-            self._stat_ones[:sample_count],
+            ones[:sample_count],
             self._stat_eq[:sample_count],
             self._stat_match[:sample_count],
         )
 
     def _topk_eq_view(self, sample_count: int, top_k: int) -> torch.Tensor:
-        """Return a pinned [N, K] bool view for one top-k membership compare.
+        """Return a pinned [N, K] bool tensor for one top-k membership compare.
 
         Purpose:
-            Grow the pinned top-k equality buffer when the batch is wider
-            than the current rows, then return the view this compare writes.
+            Reuse the pinned top-k equality buffer on the warmed path when
+            its stored rows and width already match this compare, without
+            building an identical [N, K] view.
 
         Strategy:
-            Allocate a bool buffer of width ``_max_top_k`` when the stored
-            row count is too small, then slice to ``sample_count`` by
-            ``top_k``.
+            Return the stored buffer when its shape is ``(sample_count,
+            top_k)``. Allocate a bool buffer of width ``_max_top_k`` only
+            when the stored row count is too small. Slice to this compare
+            when the stored shape is larger.
 
         Args:
             sample_count: Number of flattened labels in the batch.
@@ -400,18 +474,28 @@ class MetricsTracker(nn.Module):
             Bool tensor of shape ``(sample_count, top_k)``.
 
         Flow:
-            1. Grow scratch when needed
-            2. Slice this compare
+            1. Return an exact-shape buffer
+            2. Grow scratch when needed
+            3. Slice a smaller compare
         """
-        # 1. Grow scratch when needed
-        if self._topk_eq.shape[0] < sample_count:
-            self._topk_eq = torch.empty(
+        buf = self._topk_eq
+        rows, cols = buf.shape
+        # 1. Return an exact-shape buffer
+        if rows == sample_count and cols == top_k:
+            return buf
+        # 2. Grow scratch when needed
+        if rows < sample_count:
+            buf = torch.empty(
                 (sample_count, self._max_top_k),
                 dtype=torch.bool,
                 device=self._device,
             )
-        # 2. Slice this compare
-        return self._topk_eq[:sample_count, :top_k]
+            self._topk_eq = buf
+            rows, cols = buf.shape
+            if rows == sample_count and cols == top_k:
+                return buf
+        # 3. Slice a smaller compare
+        return buf[:sample_count, :top_k]
 
     def _prepare_batch_stats(
         self,
@@ -578,17 +662,17 @@ class MetricsTracker(nn.Module):
         Purpose:
             Build the same per-class tp/fp/fn as torchmetrics' multiclass
             accuracy, precision, recall, and F1 path, using a pinned
-            true-positive scatter buffer, a shared target-support histogram,
-            and pinned match slots.
+            true-positive buffer, a shared target-support histogram, and
+            pinned match slots, without a general ``scatter_add_`` for
+            length-C histograms.
 
         Strategy:
             Send a top-k accuracy leader through membership hits. For top-1,
             reuse column 0 of the shared top-k equality buffer when that
             tensor was reduced from logits, otherwise write equality into
-            pinned match slots. Scatter matches into the pinned
-            true-positive buffer, scatter the predicted-class histogram
-            into the leader's false-positive tensor, then add true
-            positives and support-minus-tp into the leader. Multiclass
+            pinned match slots. Copy the pinned bool match column, zero the
+            true-positive bin, ``index_add_`` matches and predicted ones,
+            then subtract tp from the leader false-positive tensor. Multiclass
             compute does not fill true negatives.
 
         Args:
@@ -604,7 +688,7 @@ class MetricsTracker(nn.Module):
         Flow:
             1. Dispatch top-k hits
             2. Write top-1 match
-            3. Scatter tp and fold false positives into the leader
+            3. Accumulate tp and fold false positives into the leader
             4. Add tp and support-minus-tp into the leader
         """
         # 1. Dispatch top-k hits
@@ -624,14 +708,14 @@ class MetricsTracker(nn.Module):
         else:
             torch.eq(pred_idx, target_idx, out=eq_buf)
             match.copy_(eq_buf)
-        # 3. Scatter tp and fold false positives into the leader
+        # 3. Accumulate tp and fold false positives into the leader
         self._stat_tp.zero_()
-        self._stat_tp.scatter_add_(0, target_idx, match)
+        self._stat_tp.index_add_(0, target_idx, match)
         fp_state = leader.fp
         if not isinstance(fp_state, torch.Tensor):
             message = "leader confusion state must be a tensor"
             raise TypeError(message)
-        fp_state.scatter_add_(0, pred_idx, ones)
+        fp_state.index_add_(0, pred_idx, ones)
         fp_state.sub_(self._stat_tp)
         # 4. Add tp and support-minus-tp into the leader
         self._add_leader_counts(leader)
@@ -693,19 +777,19 @@ class MetricsTracker(nn.Module):
 
         Purpose:
             Fold one batch loss into the running mean without allocating a
-            new 0-dim value or weight tensor on the warmed path.
+            new 0-dim value or weight tensor, and without re-checking type
+            or rank on the slots this method already pinned.
 
         Strategy:
             Copy a tensor loss or fill a Python float into the pinned 0-dim
-            slot, then update mean loss with that slot and the pinned unit
-            weight.
+            slot, then accumulate through ``update_pinned``.
 
         Args:
             loss_value: Scalar loss from the current batch.
 
         Flow:
             1. Write loss into pinned slot
-            2. Update mean loss
+            2. Pinned accumulate
         """
         # 1. Write loss into pinned slot
         if isinstance(loss_value, torch.Tensor):
@@ -717,8 +801,8 @@ class MetricsTracker(nn.Module):
             )
         else:
             self._loss_value.fill_(loss_value)
-        # 2. Update mean loss
-        self.avg_loss.update(self._loss_value, weight=self._loss_weight)
+        # 2. Pinned accumulate
+        self.avg_loss.update_pinned(self._loss_value, self._loss_weight)
 
     def compute(self) -> dict[str, float]:
         """Compute current metric values as Python floats.

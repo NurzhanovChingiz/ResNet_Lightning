@@ -56,9 +56,24 @@ def build_split_datasets() -> tuple[Dataset, Dataset, Dataset]:
     )
 
     # 3. Wrap each split in Dataset
-    train_dataset = Dataset(train_images, train_labels, transform=CFG.TRAIN_TRANSFORM)
-    val_dataset = Dataset(val_images, val_labels, transform=CFG.TEST_TRANSFORM)
-    test_dataset = Dataset(test_images, test_labels, transform=CFG.TEST_TRANSFORM)
+    train_dataset = Dataset(
+        train_images,
+        train_labels,
+        transform=CFG.TRAIN_TRANSFORM,
+        cache_maxsize=CFG.BATCH,
+    )
+    val_dataset = Dataset(
+        val_images,
+        val_labels,
+        transform=CFG.TEST_TRANSFORM,
+        cache_maxsize=CFG.BATCH,
+    )
+    test_dataset = Dataset(
+        test_images,
+        test_labels,
+        transform=CFG.TEST_TRANSFORM,
+        cache_maxsize=CFG.BATCH,
+    )
     return train_dataset, val_dataset, test_dataset
 
 
