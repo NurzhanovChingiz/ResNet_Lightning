@@ -189,6 +189,44 @@ def test_update_metrics_reuses_shared_topk_and_skips_argmax(
     assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
 
 
+def test_update_metrics_runs_topk_in_inference_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed logits batch must reduce top-k without autograd tracking."""
+    tracker = _cpu_tracker()
+    warmup_preds, warmup_targets = _cifar_batch(0)
+    tracker.update_metrics(warmup_preds, warmup_targets)
+    grad_enabled: list[bool] = []
+    inference_enabled: list[bool] = []
+    original_topk = torch.Tensor.topk
+
+    def wrapped_topk(self: torch.Tensor, *args: object, **kwargs: object) -> object:
+        grad_enabled.append(torch.is_grad_enabled())
+        inference_enabled.append(torch.is_inference_mode_enabled())
+        recast = cast("Callable[..., object]", original_topk)
+        return recast(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "topk", wrapped_topk)
+    preds, targets = _cifar_batch(1)
+    preds.requires_grad = True
+    tracker.update_metrics(preds, targets)
+    assert grad_enabled == [False]
+    assert inference_enabled == [True]
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top5 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=5
+    )
+    accuracy_top1.update(warmup_preds, warmup_targets)
+    accuracy_top1.update(preds.detach(), targets)
+    accuracy_top5.update(warmup_preds, warmup_targets)
+    accuracy_top5.update(preds.detach(), targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+    assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
+
+
 def test_update_metrics_skips_top1_bincount(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -255,6 +293,33 @@ def test_update_metrics_skips_topk_pred_reconstruction_and_fp_scatter(
     assert values["f1_score"] == pytest.approx(f1_score.compute().item())
 
 
+def test_update_metrics_skips_class_length_stat_copies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed update must not copy per-class scratch tensors."""
+    tracker = _cpu_tracker()
+    warmup_preds, warmup_targets = _cifar_batch(0)
+    tracker.update_metrics(warmup_preds, warmup_targets)
+    copied_sizes: list[int] = []
+    original_copy = torch.Tensor.copy_
+
+    def wrapped(self: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
+        copied_sizes.append(self.numel())
+        return original_copy(self, src)
+
+    monkeypatch.setattr(torch.Tensor, "copy_", wrapped)
+    preds, targets = _cifar_batch(1)
+    tracker.update_metrics(preds, targets)
+    assert 10 not in copied_sizes
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top1.update(warmup_preds, warmup_targets)
+    accuracy_top1.update(preds, targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+
+
 def test_update_metrics_skips_allocating_topk_equality(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -297,6 +362,40 @@ def test_update_metrics_skips_allocating_topk_equality(
     assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
 
 
+def test_update_metrics_skips_duplicate_topk_equality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed logits batch must compare ranked indices to labels once."""
+    tracker = _cpu_tracker()
+    warmup_preds, warmup_targets = _cifar_batch(0)
+    tracker.update_metrics(warmup_preds, warmup_targets)
+    eq_count = {"n": 0}
+    original_eq = torch.eq
+
+    def wrapped_eq(*args: object, **kwargs: object) -> torch.Tensor:
+        eq_count["n"] += 1
+        recast = cast("Callable[..., torch.Tensor]", original_eq)
+        return recast(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "eq", wrapped_eq)
+    preds, targets = _cifar_batch(1)
+    tracker.update_metrics(preds, targets)
+    assert eq_count["n"] == 1
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top5 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=5
+    )
+    accuracy_top1.update(warmup_preds, warmup_targets)
+    accuracy_top1.update(preds, targets)
+    accuracy_top5.update(warmup_preds, warmup_targets)
+    accuracy_top5.update(preds, targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
+    assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
+
+
 def test_update_metrics_skips_topk_one_hot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -316,6 +415,34 @@ def test_update_metrics_skips_topk_one_hot(
     accuracy_top5.update(warmup_preds, warmup_targets)
     accuracy_top5.update(preds, targets)
     assert values["accuracy_top5"] == pytest.approx(accuracy_top5.compute().item())
+
+
+def test_update_metrics_skips_flat_index_reshape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warmed 1-D label batch must not reshape already-flat indices."""
+    tracker = _cpu_tracker()
+    warmup_preds, warmup_targets = _cifar_batch(0)
+    tracker.update_metrics(warmup_preds, warmup_targets)
+    reshape_count = {"n": 0}
+    original_reshape = torch.Tensor.reshape
+
+    def wrapped(self: torch.Tensor, *args: object, **kwargs: object) -> torch.Tensor:
+        reshape_count["n"] += 1
+        recast = cast("Callable[..., torch.Tensor]", original_reshape)
+        return recast(self, *args, **kwargs)
+
+    monkeypatch.setattr(torch.Tensor, "reshape", wrapped)
+    preds, targets = _cifar_batch(1)
+    tracker.update_metrics(preds, targets)
+    assert reshape_count["n"] == 0
+    values = tracker.compute()
+    accuracy_top1 = Accuracy(
+        task="multiclass", num_classes=10, average="weighted", top_k=1
+    )
+    accuracy_top1.update(warmup_preds, warmup_targets)
+    accuracy_top1.update(preds, targets)
+    assert values["accuracy_top1"] == pytest.approx(accuracy_top1.compute().item())
 
 
 def test_update_metrics_skips_dtype_recast_after_warmup(

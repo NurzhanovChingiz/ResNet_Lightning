@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch import Tensor, nn
@@ -479,9 +479,9 @@ class ResNet(nn.Module):
             requiring an exact key and class-count match.
 
         Strategy:
-            Download the state dict, keep keys this module already owns, load
-            them, then replace ``self.classifier`` when the class count is not
-            ImageNet-1000.
+            Download the state dict, keep tensors whose names and shapes match
+            this module, load them, then replace ``self.fc`` when the class
+            count is not ImageNet-1000.
 
         Args:
             checkpoint_url: HTTPS URL of a torchvision ResNet ``.pth`` file.
@@ -493,8 +493,8 @@ class ResNet(nn.Module):
         Flow:
             1. Snapshot this module's state dict
             2. Download the checkpoint tensors
-            3. Keep overlapping keys and apply them
-            4. Replace the classifier when the class count is not 1000
+            3. Keep name-and-shape overlapping tensors and apply them
+            4. Replace ``self.fc`` when the class count is not 1000
         """
         # 1. Snapshot this module's state dict
         state_dict = nn.Module.state_dict(self)
@@ -503,16 +503,18 @@ class ResNet(nn.Module):
             checkpoint_url,
             progress=True,
         )
-        # 3. Keep overlapping keys and apply them
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in state_dict}
-        state_dict.update(pretrained_dict)
+        # 3. Keep name-and-shape overlapping tensors and apply them
+        compatible = {
+            key: tensor
+            for key, tensor in pretrained_dict.items()
+            if key in state_dict and tensor.shape == state_dict[key].shape
+        }
+        state_dict.update(compatible)
         nn.Module.load_state_dict(self, state_dict)
-        # 4. Replace the classifier when the class count is not 1000
+        # 4. Replace ``self.fc`` when the class count is not 1000
         if num_classes != 1000:
-            # nn.Module.__getattr__ types undeclared attributes as Tensor | Module.
-            classifier = cast("Any", self.classifier)
-            in_features = classifier[-1].in_features
-            classifier[-1] = nn.Linear(in_features, num_classes)
+            in_features = self.fc.in_features
+            self.fc = nn.Linear(in_features, num_classes)
 
 
 class ResNet18(ResNet):
